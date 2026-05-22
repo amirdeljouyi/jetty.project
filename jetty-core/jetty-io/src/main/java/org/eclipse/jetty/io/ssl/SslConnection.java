@@ -1401,7 +1401,7 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
             try
             {
                 boolean fillInterest = false;
-                ReadableBuffer read = null;
+                ReadableBuffer encryptedOutput = null;
                 try (AutoLock ignored = _lock.lock())
                 {
                     if (LOG.isDebugEnabled())
@@ -1419,7 +1419,7 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                             case NEED_WRAP:
                             case NOT_HANDSHAKING:
                                 // write what we have or an empty buffer to reschedule a call to flush
-                                read = (_encryptedOutput != null && _encryptedOutput.remaining() > 0L) ? _encryptedOutput : ReadableBuffer.EMPTY;
+                                encryptedOutput = (_encryptedOutput != null && _encryptedOutput.remaining() > 0L) ? _encryptedOutput : ReadableBuffer.EMPTY;
                                 _flushState = FlushState.WRITING;
                                 break;
 
@@ -1427,7 +1427,7 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                                 // If we have something to write, then write it and ignore the needed unwrap for now.
                                 if (_encryptedOutput != null && _encryptedOutput.remaining() > 0L)
                                 {
-                                    read = _encryptedOutput;
+                                    encryptedOutput = _encryptedOutput;
                                     _flushState = FlushState.WRITING;
                                     break;
                                 }
@@ -1454,7 +1454,7 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                                     if (LOG.isDebugEnabled())
                                         LOG.debug("Incomplete flush?", e);
                                     close(e);
-                                    read = ReadableBuffer.EMPTY;
+                                    encryptedOutput = ReadableBuffer.EMPTY;
                                     _flushState = FlushState.WRITING;
                                     break;
                                 }
@@ -1472,11 +1472,11 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                     }
 
                     if (LOG.isDebugEnabled())
-                        LOG.debug("<onIncompleteFlush s={}/{} fi={} w={}", _flushState, _fillState, fillInterest, read);
+                        LOG.debug("<onIncompleteFlush s={}/{} fi={} w={}", _flushState, _fillState, fillInterest, encryptedOutput);
                 }
 
-                if (read != null)
-                    read.writeTo(input -> getEndPoint().write(_incompleteWriteCallback, input));
+                if (encryptedOutput != null)
+                    encryptedOutput.writeTo(input -> getEndPoint().write(_incompleteWriteCallback, input));
                 else if (fillInterest)
                     ensureFillInterested();
             }
@@ -1534,25 +1534,31 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                     {
                         // If we still can't flush, but we are not closing the endpoint,
                         // let's just flush the encrypted output in the background.
-                        ReadableBuffer read;
+                        ReadableBuffer encryptedOutput;
                         try (AutoLock ignored = _lock.lock())
                         {
-                            read = _encryptedOutput;
-                            _encryptedOutput = null;
-                            if (read != null && read.remaining() > 0L)
+                            encryptedOutput = _encryptedOutput;
+                            if (encryptedOutput != null && encryptedOutput.remaining() > 0L)
                                 _flushState = FlushState.WRITING;
                         }
-                        if (read != null)
+                        if (encryptedOutput != null)
                         {
-                            read.writeTo(input ->
+                            encryptedOutput.writeTo(input ->
                                 endPoint.write(Callback.from(() ->
                                 {
                                     try (AutoLock ignored = _lock.lock())
                                     {
                                         _flushState = FlushState.IDLE;
-                                        read.release();
+                                        lockedDiscardEncryptedOutputBuffer();
                                     }
-                                }, t -> disconnect()), input));
+                                }, t ->
+                                {
+                                    try (AutoLock ignored = _lock.lock())
+                                    {
+                                        lockedDiscardEncryptedOutputBuffer();
+                                    }
+                                    disconnect();
+                                }), input));
                         }
                     }
                 }
