@@ -1542,24 +1542,7 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                                 _flushState = FlushState.WRITING;
                         }
                         if (encryptedOutput != null)
-                        {
-                            encryptedOutput.writeTo(input ->
-                                endPoint.write(Callback.from(() ->
-                                {
-                                    try (AutoLock ignored = _lock.lock())
-                                    {
-                                        _flushState = FlushState.IDLE;
-                                        lockedDiscardEncryptedOutputBuffer();
-                                    }
-                                }, t ->
-                                {
-                                    try (AutoLock ignored = _lock.lock())
-                                    {
-                                        lockedDiscardEncryptedOutputBuffer();
-                                    }
-                                    disconnect();
-                                }), input));
-                        }
+                            encryptedOutput.writeTo(input -> endPoint.write(Callback.from(this::shutdownOutputWriteSuccess, this::shutdownOutputWriteFailure), input));
                     }
                 }
 
@@ -1574,6 +1557,20 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                     LOG.trace("IGNORED", x);
                 disconnect();
             }
+        }
+
+        private void shutdownOutputWriteSuccess()
+        {
+            try (AutoLock ignored = _lock.lock())
+            {
+                _flushState = FlushState.IDLE;
+                lockedDiscardEncryptedOutputBuffer();
+            }
+        }
+
+        private void shutdownOutputWriteFailure(Throwable ignore)
+        {
+            disconnect();
         }
 
         private void disconnect()
