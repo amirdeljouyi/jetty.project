@@ -707,53 +707,58 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
         @Override
         public int fill(ByteBuffer buffer) throws IOException
         {
-            try
+            try (AutoLock ignored = _lock.lock())
             {
-                try (AutoLock ignored = _lock.lock())
+                if (LOG.isDebugEnabled())
+                    LOG.debug(">fill {}", SslConnection.this);
+
+                if (_fillState != FillState.IDLE)
+                    return 0;
+
+                // Do we already have some decrypted data?
+                if (_decryptedInput != null && _decryptedInput.remaining() > 0L)
                 {
-                    if (LOG.isDebugEnabled())
-                        LOG.debug(">fill {}", SslConnection.this);
-
-                    if (_fillState != FillState.IDLE)
-                        return 0;
-
-                    // Do we already have some decrypted data?
-                    if (_decryptedInput != null && _decryptedInput.remaining() > 0L)
+                    int put = BufferUtil.put(_decryptedInput, buffer);
+                    if (_decryptedInput.remaining() == 0L)
                     {
-                        int put = BufferUtil.put(_decryptedInput, buffer);
-                        if (_decryptedInput.remaining() == 0L)
-                        {
-                            _decryptedInput.release();
-                            _decryptedInput = null;
-                        }
-                        return put;
+                        _decryptedInput.release();
+                        _decryptedInput = null;
                     }
+                    return put;
+                }
 
-                    int filled = -2;
-                    ReadableBuffer decryptedInput = null;
-                    boolean decryptedInputWrapsUserProvidedBuffer = false;
-                    ReadableBuffer encryptedInput = null;
-                    long encryptedInputRemainingWriteSpace;
-                    try
+                int filled = -2;
+                ReadableBuffer decryptedInput = null;
+                boolean decryptedInputWrapsUserProvidedBuffer = false;
+                ReadableBuffer encryptedInput = null;
+                long encryptedInputRemainingWriteSpace;
+                try
+                {
+                    // loop filling and unwrapping until we have something
+                    while (true)
                     {
-                        // loop filling and unwrapping until we have something
-                        while (true)
+                        HandshakeStatus status = _sslEngine.getHandshakeStatus();
+                        if (LOG.isDebugEnabled())
+                            LOG.debug("fill {}", status);
+                        switch (status)
                         {
-                            HandshakeStatus status = _sslEngine.getHandshakeStatus();
-                            if (LOG.isDebugEnabled())
-                                LOG.debug("fill {}", status);
-                            switch (status)
-                            {
-                                case NEED_UNWRAP:
-                                case NOT_HANDSHAKING:
-                                    break;
+                            case NEED_UNWRAP:
+                            case NOT_HANDSHAKING:
+                                break;
 
-                                case NEED_TASK:
-                                    _sslEngine.getDelegatedTask().run();
-                                    continue;
+                            case NEED_TASK:
+                                _sslEngine.getDelegatedTask().run();
+                                continue;
 
-                                case NEED_WRAP:
-                                    if (_flushState == FlushState.IDLE && flush(BufferUtil.EMPTY_BUFFER))
+                            case NEED_WRAP:
+                                if (_flushState == FlushState.IDLE)
+                                {
+                                    // Store the encrypted inputs in the fields as the folowing call to
+                                    // flush() may itself re-enter fill().
+                                    lockedReleaseEmptyInputBuffers(encryptedInput, decryptedInputWrapsUserProvidedBuffer ? null : decryptedInput);
+                                    encryptedInput = null;
+                                    decryptedInput = decryptedInputWrapsUserProvidedBuffer ? decryptedInput : null;
+                                    if (flush(BufferUtil.EMPTY_BUFFER))
                                     {
                                         Throwable failure = _failure;
                                         if (failure != null)
@@ -762,227 +767,227 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                                             return filled = -1;
                                         continue;
                                     }
-                                    // Handle in needsFillInterest().
-                                    return filled = 0;
+                                }
+                                // Handle in needsFillInterest().
+                                return filled = 0;
 
-                                default:
-                                    throw new IllegalStateException("Unexpected HandshakeStatus " + status);
-                            }
+                            default:
+                                throw new IllegalStateException("Unexpected HandshakeStatus " + status);
+                        }
 
-                            // Let's try reading some encrypted data... even if we have some already.
-                            int netFilled;
+                        // Let's try reading some encrypted data... even if we have some already.
+                        int netFilled;
+                        {
+                            WritableBuffer wb;
+                            if (encryptedInput == null)
                             {
-                                WritableBuffer wb;
-                                if (encryptedInput == null)
+                                wb = lockedAcquireEncryptedInput();
+                            }
+                            else
+                            {
+                                wb = encryptedInput.compact();
+                                encryptedInput = null;
+                            }
+                            try
+                            {
+                                netFilled = networkFill(wb);
+                                encryptedInputRemainingWriteSpace = wb.remaining();
+                                encryptedInput = wb.toReadable();
+                            }
+                            catch (Throwable x)
+                            {
+                                wb.release();
+                                throw x;
+                            }
+                        }
+
+                        if (netFilled > 0)
+                            _bytesIn.addAndGet(netFilled);
+                        if (LOG.isDebugEnabled())
+                            LOG.debug("net filled={}", netFilled);
+
+                        // Workaround for Java 11 behavior.
+                        if (netFilled < 0 && isHandshakeInitial() && encryptedInput.remaining() == 0L)
+                            closeInbound();
+
+                        if (netFilled > 0 && !isHandshakeComplete() && isOutboundDone())
+                            throw new SSLHandshakeException("Closed during handshake");
+
+                        if (_handshake.compareAndSet(HandshakeState.INITIAL, HandshakeState.HANDSHAKE))
+                        {
+                            if (LOG.isDebugEnabled())
+                                LOG.debug("fill starting handshake {}", SslConnection.this);
+                        }
+
+                        int appBufferSize = getApplicationBufferSize();
+                        SSLEngineResult unwrapResult;
+                        {
+                            // can we use the passed buffer if it is big enough
+                            WritableBuffer writableAppIn;
+                            if (decryptedInput != null)
+                            {
+                                // Re-use the buffer acquired in a previous loop iteration.
+                                writableAppIn = decryptedInput.compact();
+                                decryptedInput = null;
+                            }
+                            else if (_decryptedInput == null)
+                            {
+                                if (BufferUtil.space(buffer) > appBufferSize)
                                 {
-                                    wb = lockedAcquireEncryptedInput();
+                                    // Use the caller-provided buffer.
+                                    writableAppIn = ReadableBuffer.wrap(buffer).toWritable();
+                                    decryptedInputWrapsUserProvidedBuffer = true;
                                 }
                                 else
                                 {
-                                    wb = encryptedInput.compact();
-                                    encryptedInput = null;
-                                }
-                                try
-                                {
-                                    netFilled = networkFill(wb);
-                                    encryptedInputRemainingWriteSpace = wb.remaining();
-                                    encryptedInput = wb.toReadable();
-                                }
-                                catch (Throwable x)
-                                {
-                                    wb.release();
-                                    throw x;
+                                    // Acquire a fresh new buffer.
+                                    writableAppIn = _bufferPool.acquire(appBufferSize, _decryptedDirectBuffers);
                                 }
                             }
-
-                            if (netFilled > 0)
-                                _bytesIn.addAndGet(netFilled);
-                            if (LOG.isDebugEnabled())
-                                LOG.debug("net filled={}", netFilled);
-
-                            // Workaround for Java 11 behavior.
-                            if (netFilled < 0 && isHandshakeInitial() && encryptedInput.remaining() == 0L)
-                                closeInbound();
-
-                            if (netFilled > 0 && !isHandshakeComplete() && isOutboundDone())
-                                throw new SSLHandshakeException("Closed during handshake");
-
-                            if (_handshake.compareAndSet(HandshakeState.INITIAL, HandshakeState.HANDSHAKE))
+                            else
                             {
-                                if (LOG.isDebugEnabled())
-                                    LOG.debug("fill starting handshake {}", SslConnection.this);
+                                // Re-use the non-empty buffer stored by a previous fill() call.
+                                writableAppIn = _decryptedInput.compact();
+                                _decryptedInput = null;
                             }
 
-                            int appBufferSize = getApplicationBufferSize();
-                            SSLEngineResult unwrapResult;
+                            try
                             {
-                                // can we use the passed buffer if it is big enough
-                                WritableBuffer writableAppIn;
-                                if (decryptedInput != null)
+                                // Let's unwrap even if we have no net data because in that
+                                // case we want to fall through to the handshake handling
+                                SSLEngineResult[] unwrapResultArray = new SSLEngineResult[1];
+                                _underflown = false;
+                                encryptedInput.writeTo(input -> writableAppIn.readFrom(output ->
                                 {
-                                    // Re-use the buffer acquired in a previous loop iteration.
-                                    writableAppIn = decryptedInput.compact();
-                                    decryptedInput = null;
-                                }
-                                else if (_decryptedInput == null)
-                                {
-                                    if (BufferUtil.space(buffer) > appBufferSize)
-                                    {
-                                        // Use the caller-provided buffer.
-                                        writableAppIn = ReadableBuffer.wrap(buffer).toWritable();
-                                        decryptedInputWrapsUserProvidedBuffer = true;
-                                    }
-                                    else
-                                    {
-                                        // Acquire a fresh new buffer.
-                                        writableAppIn = _bufferPool.acquire(appBufferSize, _decryptedDirectBuffers);
-                                    }
-                                }
-                                else
-                                {
-                                    // Re-use the non-empty buffer stored by a previous fill() call.
-                                    writableAppIn = _decryptedInput.compact();
-                                    _decryptedInput = null;
-                                }
-
-                                try
-                                {
-                                    // Let's unwrap even if we have no net data because in that
-                                    // case we want to fall through to the handshake handling
-                                    SSLEngineResult[] unwrapResultArray = new SSLEngineResult[1];
-                                    _underflown = false;
-                                    encryptedInput.writeTo(input -> writableAppIn.readFrom(output ->
-                                    {
-                                        SSLEngineResult unwrapResult1 = SslConnection.this.unwrap(_sslEngine, input, output);
-                                        unwrapResultArray[0] = unwrapResult1;
-                                        return unwrapResult1.getStatus() == Status.CLOSED;
-                                    }));
-                                    unwrapResult = unwrapResultArray[0];
-                                    decryptedInput = writableAppIn.toReadable();
-                                }
-                                catch (Throwable x)
-                                {
-                                    writableAppIn.release();
-                                    throw x;
-                                }
+                                    SSLEngineResult unwrapResult1 = SslConnection.this.unwrap(_sslEngine, input, output);
+                                    unwrapResultArray[0] = unwrapResult1;
+                                    return unwrapResult1.getStatus() == Status.CLOSED;
+                                }));
+                                unwrapResult = unwrapResultArray[0];
+                                decryptedInput = writableAppIn.toReadable();
                             }
-
-                            if (LOG.isDebugEnabled())
-                                LOG.debug("unwrap net_filled={} {} encryptedBuffer={} unwrapBuffer={} appBuffer={}",
-                                    netFilled,
-                                    StringUtil.replace(unwrapResult.toString(), '\n', ' '),
-                                    encryptedInput,
-                                    decryptedInput,
-                                    BufferUtil.toDetailString(buffer));
-
-                            Status unwrap = unwrapResult.getStatus();
-
-                            // Extra check on unwrapResultStatus == OK with zero bytes consumed
-                            // or produced is due to an SSL client on Android (see bug #454773).
-                            if (unwrap == Status.OK && unwrapResult.bytesConsumed() == 0 && unwrapResult.bytesProduced() == 0)
-                                unwrap = Status.BUFFER_UNDERFLOW;
-
-                            switch (unwrap)
+                            catch (Throwable x)
                             {
-                                case CLOSED:
-                                    Throwable failure = _failure;
-                                    if (failure != null)
-                                        throw IO.rethrow(failure);
-                                    return filled = -1;
-
-                                case BUFFER_UNDERFLOW:
-                                    // Are we out of space?
-                                    if (encryptedInputRemainingWriteSpace == 0L)
-                                        throw new SSLHandshakeException("Encrypted buffer max length exceeded");
-
-                                    // if we just filled some
-                                    if (netFilled > 0)
-                                        continue; // try filling some more
-
-                                    _underflown = true;
-                                    if (netFilled < 0 && _sslEngine.getUseClientMode())
-                                    {
-                                        Throwable closeFailure = closeInbound();
-                                        if (_flushState == FlushState.WAIT_FOR_FILL)
-                                        {
-                                            Throwable handshakeFailure = new SSLHandshakeException("Abruptly closed by peer");
-                                            if (closeFailure != null)
-                                                handshakeFailure.addSuppressed(closeFailure);
-                                            throw handshakeFailure;
-                                        }
-                                        return filled = -1;
-                                    }
-                                    return filled = netFilled;
-
-                                case BUFFER_OVERFLOW:
-                                    // It's possible that SSLSession.applicationBufferSize has been expanded
-                                    // by the SSLEngine implementation. Unwrapping a large encrypted buffer
-                                    // causes BUFFER_OVERFLOW because the (old) applicationBufferSize is
-                                    // too small. Release the decrypted input buffer so it will be re-acquired
-                                    // with the larger capacity.
-                                    // See also system property "jsse.SSLEngine.acceptLargeFragments".
-                                    if ((decryptedInput == null || decryptedInput.remaining() == 0L) && appBufferSize < getApplicationBufferSize())
-                                        continue;
-                                    throw new IllegalStateException("Unexpected unwrap result " + unwrap);
-
-                                case OK:
-                                    if (unwrapResult.getHandshakeStatus() == HandshakeStatus.FINISHED)
-                                        lockedHandshakeSucceeded();
-
-                                    if (isRenegotiating() && !allowRenegotiate())
-                                        return filled = -1;
-
-                                    // If bytes were produced, don't bother with the handshake status;
-                                    // pass the decrypted data to the application, which will perform
-                                    // another call to fill() or flush().
-                                    if (unwrapResult.bytesProduced() > 0)
-                                    {
-                                        if (decryptedInputWrapsUserProvidedBuffer)
-                                            return filled = unwrapResult.bytesProduced();
-                                        return filled = BufferUtil.put(decryptedInput, buffer);
-                                    }
-
-                                    break;
-
-                                default:
-                                    throw new IllegalStateException("Unexpected unwrap result " + unwrap);
+                                writableAppIn.release();
+                                throw x;
                             }
-                        }
-                    }
-                    catch (Throwable x)
-                    {
-                        if (decryptedInput != null)
-                        {
-                            decryptedInput.release();
-                            decryptedInput = null;
-                        }
-                        if (encryptedInput != null)
-                        {
-                            encryptedInput.release();
-                            encryptedInput = null;
-                        }
-                        Throwable f = handleException(x, "fill");
-                        Throwable failure = handshakeFailed(f);
-                        if (_flushState == FlushState.WAIT_FOR_FILL)
-                        {
-                            _flushState = FlushState.IDLE;
-                            getExecutor().execute(() -> _sslEndPoint.getWriteFlusher().onFail(failure));
-                        }
-                        throw failure;
-                    }
-                    finally
-                    {
-                        lockedReleaseEmptyInputBuffers(encryptedInput, decryptedInputWrapsUserProvidedBuffer ? null : decryptedInput);
-
-                        if (_flushState == FlushState.WAIT_FOR_FILL)
-                        {
-                            _flushState = FlushState.IDLE;
-                            getExecutor().execute(() -> _sslEndPoint.getWriteFlusher().completeWrite());
                         }
 
                         if (LOG.isDebugEnabled())
-                            LOG.debug("<fill f={} uf={} {}", filled, _underflown, SslConnection.this);
+                            LOG.debug("unwrap net_filled={} {} encryptedBuffer={} unwrapBuffer={} appBuffer={}",
+                                netFilled,
+                                StringUtil.replace(unwrapResult.toString(), '\n', ' '),
+                                encryptedInput,
+                                decryptedInput,
+                                BufferUtil.toDetailString(buffer));
+
+                        Status unwrap = unwrapResult.getStatus();
+
+                        // Extra check on unwrapResultStatus == OK with zero bytes consumed
+                        // or produced is due to an SSL client on Android (see bug #454773).
+                        if (unwrap == Status.OK && unwrapResult.bytesConsumed() == 0 && unwrapResult.bytesProduced() == 0)
+                            unwrap = Status.BUFFER_UNDERFLOW;
+
+                        switch (unwrap)
+                        {
+                            case CLOSED:
+                                Throwable failure = _failure;
+                                if (failure != null)
+                                    throw IO.rethrow(failure);
+                                return filled = -1;
+
+                            case BUFFER_UNDERFLOW:
+                                // Are we out of space?
+                                if (encryptedInputRemainingWriteSpace == 0L)
+                                    throw new SSLHandshakeException("Encrypted buffer max length exceeded");
+
+                                // if we just filled some
+                                if (netFilled > 0)
+                                    continue; // try filling some more
+
+                                _underflown = true;
+                                if (netFilled < 0 && _sslEngine.getUseClientMode())
+                                {
+                                    Throwable closeFailure = closeInbound();
+                                    if (_flushState == FlushState.WAIT_FOR_FILL)
+                                    {
+                                        Throwable handshakeFailure = new SSLHandshakeException("Abruptly closed by peer");
+                                        if (closeFailure != null)
+                                            handshakeFailure.addSuppressed(closeFailure);
+                                        throw handshakeFailure;
+                                    }
+                                    return filled = -1;
+                                }
+                                return filled = netFilled;
+
+                            case BUFFER_OVERFLOW:
+                                // It's possible that SSLSession.applicationBufferSize has been expanded
+                                // by the SSLEngine implementation. Unwrapping a large encrypted buffer
+                                // causes BUFFER_OVERFLOW because the (old) applicationBufferSize is
+                                // too small. Release the decrypted input buffer so it will be re-acquired
+                                // with the larger capacity.
+                                // See also system property "jsse.SSLEngine.acceptLargeFragments".
+                                if ((decryptedInput == null || decryptedInput.remaining() == 0L) && appBufferSize < getApplicationBufferSize())
+                                    continue;
+                                throw new IllegalStateException("Unexpected unwrap result " + unwrap);
+
+                            case OK:
+                                if (unwrapResult.getHandshakeStatus() == HandshakeStatus.FINISHED)
+                                    lockedHandshakeSucceeded();
+
+                                if (isRenegotiating() && !allowRenegotiate())
+                                    return filled = -1;
+
+                                // If bytes were produced, don't bother with the handshake status;
+                                // pass the decrypted data to the application, which will perform
+                                // another call to fill() or flush().
+                                if (unwrapResult.bytesProduced() > 0)
+                                {
+                                    if (decryptedInputWrapsUserProvidedBuffer)
+                                        return filled = unwrapResult.bytesProduced();
+                                    return filled = BufferUtil.put(decryptedInput, buffer);
+                                }
+
+                                break;
+
+                            default:
+                                throw new IllegalStateException("Unexpected unwrap result " + unwrap);
+                        }
                     }
+                }
+                catch (Throwable x)
+                {
+                    if (decryptedInput != null)
+                    {
+                        decryptedInput.release();
+                        decryptedInput = null;
+                    }
+                    if (encryptedInput != null)
+                    {
+                        encryptedInput.release();
+                        encryptedInput = null;
+                    }
+                    Throwable f = handleException(x, "fill");
+                    Throwable failure = handshakeFailed(f);
+                    if (_flushState == FlushState.WAIT_FOR_FILL)
+                    {
+                        _flushState = FlushState.IDLE;
+                        getExecutor().execute(() -> _sslEndPoint.getWriteFlusher().onFail(failure));
+                    }
+                    throw failure;
+                }
+                finally
+                {
+                    lockedReleaseEmptyInputBuffers(encryptedInput, decryptedInputWrapsUserProvidedBuffer ? null : decryptedInput);
+
+                    if (_flushState == FlushState.WAIT_FOR_FILL)
+                    {
+                        _flushState = FlushState.IDLE;
+                        getExecutor().execute(() -> _sslEndPoint.getWriteFlusher().completeWrite());
+                    }
+
+                    if (LOG.isDebugEnabled())
+                        LOG.debug("<fill f={} uf={} {}", filled, _underflown, SslConnection.this);
                 }
             }
             catch (Throwable x)
@@ -1153,162 +1158,192 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
         @Override
         public boolean flush(ByteBuffer... appOuts) throws IOException
         {
-            try
+            try (AutoLock ignored = _lock.lock())
             {
-                try (AutoLock ignored = _lock.lock())
+                if (LOG.isDebugEnabled())
                 {
-                    if (LOG.isDebugEnabled())
+                    LOG.debug(">flush {}", SslConnection.this);
+                    int i = 0;
+                    for (ByteBuffer b : appOuts)
                     {
-                        LOG.debug(">flush {}", SslConnection.this);
-                        int i = 0;
-                        for (ByteBuffer b : appOuts)
+                        LOG.debug("flush b[{}]={}", i++, BufferUtil.toDetailString(b));
+                    }
+                }
+
+                ReadableBuffer encryptedOutput = null;
+                boolean result = false;
+                try
+                {
+                    // finish of any previous flushes
+                    if (_encryptedOutput != null)
+                    {
+                        int remaining = (int)_encryptedOutput.remaining();
+                        if (remaining > 0)
                         {
-                            LOG.debug("flush b[{}]={}", i++, BufferUtil.toDetailString(b));
+                            boolean flushed = networkFlush(_encryptedOutput);
+                            int written = (int)(remaining - _encryptedOutput.remaining());
+                            if (written > 0)
+                                _bytesOut.addAndGet(written);
+                            if (!flushed)
+                                return false;
+                            if (_encryptedOutput.remaining() == 0L)
+                            {
+                                _encryptedOutput.release();
+                                _encryptedOutput = null;
+                            }
                         }
                     }
 
-                    ReadableBuffer encryptedOutput = null;
-                    boolean result = false;
-                    try
+                    boolean isEmpty = BufferUtil.isEmpty(appOuts);
+
+                    if (_flushState != FlushState.IDLE)
+                        return false;
+
+                    // Keep going while we can make progress or until we are done
+                    loop:
+                    while (true)
                     {
-                        // finish of any previous flushes
-                        if (_encryptedOutput != null)
+                        HandshakeStatus status = _sslEngine.getHandshakeStatus();
+                        if (LOG.isDebugEnabled())
+                            LOG.debug("flush {}", status);
+                        switch (status)
                         {
-                            int remaining = (int)_encryptedOutput.remaining();
-                            if (remaining > 0)
-                            {
-                                boolean flushed = networkFlush(_encryptedOutput);
-                                int written = (int)(remaining - _encryptedOutput.remaining());
-                                if (written > 0)
-                                    _bytesOut.addAndGet(written);
-                                if (!flushed)
-                                    return false;
-                                if (_encryptedOutput.remaining() == 0L)
+                            case NEED_WRAP:
+                            case NOT_HANDSHAKING:
+                                break;
+
+                            case NEED_TASK:
+                                _sslEngine.getDelegatedTask().run();
+                                continue;
+
+                            case NEED_UNWRAP:
+                                // Workaround for Java 11 behavior.
+                                if (isHandshakeInitial() && isOutboundDone())
+                                    break;
+                                if (_fillState == FillState.IDLE)
                                 {
-                                    _encryptedOutput.release();
-                                    _encryptedOutput = null;
+                                    // Store the encrypted output in the field as the folowing call to
+                                    // fill() may itself re-enter flush().
+                                    lockedReleaseEmptyEncryptedOutputBuffer(encryptedOutput);
+                                    encryptedOutput = null;
+                                    int filled = fill(BufferUtil.EMPTY_BUFFER);
+                                    if (_sslEngine.getHandshakeStatus() != status)
+                                        continue;
+                                    if (filled < 0)
+                                        throw new IOException("Broken pipe");
                                 }
+                                result = isEmpty;
+                                break loop;
+
+                            default:
+                                throw new IllegalStateException("Unexpected HandshakeStatus " + status);
+                        }
+
+                        int packetBufferSize = getPacketBufferSize();
+
+                        if (_handshake.compareAndSet(HandshakeState.INITIAL, HandshakeState.HANDSHAKE))
+                        {
+                            if (LOG.isDebugEnabled())
+                                LOG.debug("flush starting handshake {}", SslConnection.this);
+                        }
+
+                        SSLEngineResult wrapResult;
+                        {
+                            // We call sslEngine.wrap to try to take bytes from appOuts
+                            // buffers and encrypt them into the _encryptedOutput buffer.
+                            WritableBuffer wb;
+                            if (encryptedOutput == null)
+                            {
+                                wb = lockedAcquireEncryptedOutput();
+                            }
+                            else
+                            {
+                                wb = encryptedOutput.compact();
+                                encryptedOutput = null;
+                            }
+                            try
+                            {
+                                SSLEngineResult[] wrapResultArray = new SSLEngineResult[1];
+                                wb.readFrom(output ->
+                                {
+                                    SSLEngineResult wrapResult1 = wrap(_sslEngine, appOuts, output);
+                                    wrapResultArray[0] = wrapResult1;
+                                    return wrapResult1.getStatus() == Status.CLOSED;
+                                });
+                                encryptedOutput = wb.toReadable();
+                                wrapResult = wrapResultArray[0];
+                            }
+                            catch (Throwable x)
+                            {
+                                wb.release();
+                                throw x;
                             }
                         }
 
-                        boolean isEmpty = BufferUtil.isEmpty(appOuts);
+                        if (LOG.isDebugEnabled())
+                            LOG.debug("wrap {} {} ioDone={}/{}",
+                                StringUtil.replace(wrapResult.toString(), '\n', ' '),
+                                encryptedOutput,
+                                _sslEngine.isInboundDone(),
+                                _sslEngine.isOutboundDone());
 
-                        if (_flushState != FlushState.IDLE)
-                            return false;
+                        // Was all the data consumed?
+                        isEmpty = BufferUtil.isEmpty(appOuts);
 
-                        // Keep going while we can make progress or until we are done
-                        loop:
-                        while (true)
+                        // if we have net bytes, let's try to flush them
+                        boolean flushed = true;
+                        int remaining = (int)encryptedOutput.remaining();
+                        if (remaining > 0)
                         {
-                            HandshakeStatus status = _sslEngine.getHandshakeStatus();
-                            if (LOG.isDebugEnabled())
-                                LOG.debug("flush {}", status);
-                            switch (status)
+                            flushed = networkFlush(encryptedOutput);
+                            int written = (int)(remaining - encryptedOutput.remaining());
+                            if (written > 0)
+                                _bytesOut.addAndGet(written);
+                        }
+
+                        if (LOG.isDebugEnabled())
+                            LOG.debug("net flushed={}, ac={}", flushed, isEmpty);
+
+                        // Now deal with the results returned from the wrap
+                        Status wrap = wrapResult.getStatus();
+                        switch (wrap)
+                        {
+                            case CLOSED:
                             {
-                                case NEED_WRAP:
-                                case NOT_HANDSHAKING:
-                                    break;
-
-                                case NEED_TASK:
-                                    _sslEngine.getDelegatedTask().run();
-                                    continue;
-
-                                case NEED_UNWRAP:
-                                    // Workaround for Java 11 behavior.
-                                    if (isHandshakeInitial() && isOutboundDone())
-                                        break;
-                                    if (_fillState == FillState.IDLE)
-                                    {
-                                        int filled = fill(BufferUtil.EMPTY_BUFFER);
-                                        if (_sslEngine.getHandshakeStatus() != status)
-                                            continue;
-                                        if (filled < 0)
-                                            throw new IOException("Broken pipe");
-                                    }
-                                    result = isEmpty;
+                                // TODO: do we need to remember the CLOSED state or SSLEngine
+                                // TODO: will produce CLOSED again if wrap() is called again?
+                                if (!flushed)
                                     break loop;
-
-                                default:
-                                    throw new IllegalStateException("Unexpected HandshakeStatus " + status);
+                                getEndPoint().shutdownOutput();
+                                if (isEmpty)
+                                {
+                                    result = true;
+                                    break loop;
+                                }
+                                throw new IOException("Broken pipe");
                             }
 
-                            int packetBufferSize = getPacketBufferSize();
+                            case BUFFER_OVERFLOW:
+                                if (!flushed)
+                                    break loop;
+                                // It's possible that SSLSession.packetBufferSize has been expanded
+                                // by the SSLEngine implementation. Wrapping a large application buffer
+                                // causes BUFFER_OVERFLOW because the (old) packetBufferSize is
+                                // too small. Release the encrypted output buffer so that it will
+                                // be re-acquired with the larger capacity.
+                                // See also system property "jsse.SSLEngine.acceptLargeFragments".
+                                if (packetBufferSize < getPacketBufferSize())
+                                    continue;
+                                throw new IllegalStateException("Unexpected wrap result " + wrap);
 
-                            if (_handshake.compareAndSet(HandshakeState.INITIAL, HandshakeState.HANDSHAKE))
-                            {
-                                if (LOG.isDebugEnabled())
-                                    LOG.debug("flush starting handshake {}", SslConnection.this);
-                            }
+                            case OK:
+                                if (wrapResult.getHandshakeStatus() == HandshakeStatus.FINISHED)
+                                    lockedHandshakeSucceeded();
 
-                            SSLEngineResult wrapResult;
-                            {
-                                // We call sslEngine.wrap to try to take bytes from appOuts
-                                // buffers and encrypt them into the _encryptedOutput buffer.
-                                WritableBuffer wb;
-                                if (encryptedOutput == null)
+                                if (isRenegotiating() && !allowRenegotiate())
                                 {
-                                    wb = lockedAcquireEncryptedOutput();
-                                }
-                                else
-                                {
-                                    wb = encryptedOutput.compact();
-                                    encryptedOutput = null;
-                                }
-                                try
-                                {
-                                    SSLEngineResult[] wrapResultArray = new SSLEngineResult[1];
-                                    wb.readFrom(output ->
-                                    {
-                                        SSLEngineResult wrapResult1 = wrap(_sslEngine, appOuts, output);
-                                        wrapResultArray[0] = wrapResult1;
-                                        return wrapResult1.getStatus() == Status.CLOSED;
-                                    });
-                                    encryptedOutput = wb.toReadable();
-                                    wrapResult = wrapResultArray[0];
-                                }
-                                catch (Throwable x)
-                                {
-                                    wb.release();
-                                    throw x;
-                                }
-                            }
-
-                            if (LOG.isDebugEnabled())
-                                LOG.debug("wrap {} {} ioDone={}/{}",
-                                    StringUtil.replace(wrapResult.toString(), '\n', ' '),
-                                    encryptedOutput,
-                                    _sslEngine.isInboundDone(),
-                                    _sslEngine.isOutboundDone());
-
-                            // Was all the data consumed?
-                            isEmpty = BufferUtil.isEmpty(appOuts);
-
-                            // if we have net bytes, let's try to flush them
-                            boolean flushed = true;
-                            int remaining = (int)encryptedOutput.remaining();
-                            if (remaining > 0)
-                            {
-                                flushed = networkFlush(encryptedOutput);
-                                int written = (int)(remaining - encryptedOutput.remaining());
-                                if (written > 0)
-                                    _bytesOut.addAndGet(written);
-                            }
-
-                            if (LOG.isDebugEnabled())
-                                LOG.debug("net flushed={}, ac={}", flushed, isEmpty);
-
-                            // Now deal with the results returned from the wrap
-                            Status wrap = wrapResult.getStatus();
-                            switch (wrap)
-                            {
-                                case CLOSED:
-                                {
-                                    // TODO: do we need to remember the CLOSED state or SSLEngine
-                                    // TODO: will produce CLOSED again if wrap() is called again?
-                                    if (!flushed)
-                                        break loop;
                                     getEndPoint().shutdownOutput();
-                                    if (isEmpty)
+                                    if (isEmpty && encryptedOutput.remaining() == 0L)
                                     {
                                         result = true;
                                         break loop;
@@ -1316,70 +1351,41 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                                     throw new IOException("Broken pipe");
                                 }
 
-                                case BUFFER_OVERFLOW:
-                                    if (!flushed)
-                                        break loop;
-                                    // It's possible that SSLSession.packetBufferSize has been expanded
-                                    // by the SSLEngine implementation. Wrapping a large application buffer
-                                    // causes BUFFER_OVERFLOW because the (old) packetBufferSize is
-                                    // too small. Release the encrypted output buffer so that it will
-                                    // be re-acquired with the larger capacity.
-                                    // See also system property "jsse.SSLEngine.acceptLargeFragments".
-                                    if (packetBufferSize < getPacketBufferSize())
-                                        continue;
-                                    throw new IllegalStateException("Unexpected wrap result " + wrap);
+                                if (!flushed)
+                                    break loop;
 
-                                case OK:
-                                    if (wrapResult.getHandshakeStatus() == HandshakeStatus.FINISHED)
-                                        lockedHandshakeSucceeded();
-
-                                    if (isRenegotiating() && !allowRenegotiate())
+                                if (isEmpty)
+                                {
+                                    if (wrapResult.getHandshakeStatus() != HandshakeStatus.NEED_WRAP ||
+                                        wrapResult.bytesProduced() == 0)
                                     {
-                                        getEndPoint().shutdownOutput();
-                                        if (isEmpty && encryptedOutput.remaining() == 0L)
-                                        {
-                                            result = true;
-                                            break loop;
-                                        }
-                                        throw new IOException("Broken pipe");
-                                    }
-
-                                    if (!flushed)
+                                        result = true;
                                         break loop;
-
-                                    if (isEmpty)
-                                    {
-                                        if (wrapResult.getHandshakeStatus() != HandshakeStatus.NEED_WRAP ||
-                                            wrapResult.bytesProduced() == 0)
-                                        {
-                                            result = true;
-                                            break loop;
-                                        }
                                     }
-                                    break;
-
-                                default:
-                                    throw new IllegalStateException("Unexpected wrap result " + wrap);
-                            }
-
-                            if (getEndPoint().isOutputShutdown())
+                                }
                                 break;
+
+                            default:
+                                throw new IllegalStateException("Unexpected wrap result " + wrap);
                         }
-                        lockedReleaseEmptyEncryptedOutputBuffer(encryptedOutput);
-                        return result;
+
+                        if (getEndPoint().isOutputShutdown())
+                            break;
                     }
-                    catch (Throwable x)
-                    {
-                        if (encryptedOutput != null)
-                            encryptedOutput.release();
-                        Throwable failure = handleException(x, "flush");
-                        throw handshakeFailed(failure);
-                    }
-                    finally
-                    {
-                        if (LOG.isDebugEnabled())
-                            LOG.debug("<flush {} {}", result, SslConnection.this);
-                    }
+                    lockedReleaseEmptyEncryptedOutputBuffer(encryptedOutput);
+                    return result;
+                }
+                catch (Throwable x)
+                {
+                    if (encryptedOutput != null)
+                        encryptedOutput.release();
+                    Throwable failure = handleException(x, "flush");
+                    throw handshakeFailed(failure);
+                }
+                finally
+                {
+                    if (LOG.isDebugEnabled())
+                        LOG.debug("<flush {} {}", result, SslConnection.this);
                 }
             }
             catch (Throwable x)
