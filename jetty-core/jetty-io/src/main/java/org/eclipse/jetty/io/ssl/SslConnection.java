@@ -753,7 +753,7 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                             case NEED_WRAP:
                                 if (_flushState == FlushState.IDLE)
                                 {
-                                    // Store the encrypted inputs in the fields as the folowing call to
+                                    // Store the encrypted inputs in the fields as the following call to
                                     // flush() may itself re-enter fill().
                                     lockedReleaseEmptyInputBuffers(encryptedInput, decryptedInputWrapsUserProvidedBuffer ? null : decryptedInput);
                                     encryptedInput = null;
@@ -1229,7 +1229,7 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                                     break;
                                 if (_fillState == FillState.IDLE)
                                 {
-                                    // Store the encrypted output in the field as the folowing call to
+                                    // Store the encrypted output in the field as the following call to
                                     // fill() may itself re-enter flush().
                                     lockedReleaseEmptyEncryptedOutputBuffer(encryptedOutput);
                                     encryptedOutput = null;
