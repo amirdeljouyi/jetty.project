@@ -767,6 +767,13 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                                             return filled = -1;
                                         continue;
                                     }
+                                    // If flush() returns false, we are going to enter the finally block that stores the
+                                    // input buffers via lockedReleaseEmptyInputBuffers(). Since the latter expects
+                                    // the member variables to be null, we need to move them here back to the local vars.
+                                    encryptedInput = _encryptedInput;
+                                    _encryptedInput = null;
+                                    decryptedInput = _decryptedInput;
+                                    _decryptedInput = null;
                                 }
                                 // Handle in needsFillInterest().
                                 return filled = 0;
@@ -1229,6 +1236,11 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                                     int filled = fill(BufferUtil.EMPTY_BUFFER);
                                     if (_sslEngine.getHandshakeStatus() != status)
                                         continue;
+                                    // If _sslEngine.getHandshakeStatus() == status, we are going to enter the finally block
+                                    // that stores the output buffer via lockedReleaseEmptyOutputBuffer(). Since the latter
+                                    // expects the member variable to be null, we need to move it here back to the local var.
+                                    encryptedOutput = _encryptedOutput;
+                                    _encryptedOutput = null;
                                     if (filled < 0)
                                         throw new IOException("Broken pipe");
                                 }
