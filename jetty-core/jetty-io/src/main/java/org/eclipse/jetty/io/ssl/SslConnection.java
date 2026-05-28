@@ -758,22 +758,30 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                                     lockedReleaseEmptyInputBuffers(encryptedInput, decryptedInputWrapsUserProvidedBuffer ? null : decryptedInput);
                                     encryptedInput = null;
                                     decryptedInput = decryptedInputWrapsUserProvidedBuffer ? decryptedInput : null;
-                                    if (flush(BufferUtil.EMPTY_BUFFER))
+                                    try
                                     {
-                                        Throwable failure = _failure;
-                                        if (failure != null)
-                                            throw IO.rethrow(failure);
-                                        if (_sslEngine.isInboundDone())
-                                            return filled = -1;
-                                        continue;
+                                        if (flush(BufferUtil.EMPTY_BUFFER))
+                                        {
+                                            Throwable failure = _failure;
+                                            if (failure != null)
+                                                throw IO.rethrow(failure);
+                                            if (_sslEngine.isInboundDone())
+                                                return filled = -1;
+                                            continue;
+                                        }
                                     }
-                                    // If flush() returns false, we are going to enter the finally block that stores the
-                                    // input buffers via lockedReleaseEmptyInputBuffers(). Since the latter expects
-                                    // the member variables to be null, we need to move them here back to the local vars.
-                                    encryptedInput = _encryptedInput;
-                                    _encryptedInput = null;
-                                    decryptedInput = _decryptedInput;
-                                    _decryptedInput = null;
+                                    finally
+                                    {
+                                        // If flush() returns false or throws, we are going to enter the finally block that
+                                        // stores the input buffers via lockedReleaseEmptyInputBuffers(). Since the latter
+                                        // expects the member variables to be null, we need to move them here back to the local
+                                        // vars.
+                                        encryptedInput = _encryptedInput;
+                                        _encryptedInput = null;
+                                        decryptedInput = _decryptedInput;
+                                        _decryptedInput = null;
+                                    }
+
                                 }
                                 // Handle in needsFillInterest().
                                 return filled = 0;
@@ -1233,16 +1241,23 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                                     // fill() may itself re-enter flush().
                                     lockedReleaseEmptyEncryptedOutputBuffer(encryptedOutput);
                                     encryptedOutput = null;
-                                    int filled = fill(BufferUtil.EMPTY_BUFFER);
-                                    if (_sslEngine.getHandshakeStatus() != status)
-                                        continue;
-                                    // If _sslEngine.getHandshakeStatus() == status, we are going to enter the finally block
-                                    // that stores the output buffer via lockedReleaseEmptyOutputBuffer(). Since the latter
-                                    // expects the member variable to be null, we need to move it here back to the local var.
-                                    encryptedOutput = _encryptedOutput;
-                                    _encryptedOutput = null;
-                                    if (filled < 0)
-                                        throw new IOException("Broken pipe");
+                                    try
+                                    {
+                                        int filled = fill(BufferUtil.EMPTY_BUFFER);
+                                        if (_sslEngine.getHandshakeStatus() != status)
+                                            continue;
+                                        if (filled < 0)
+                                            throw new IOException("Broken pipe");
+                                    }
+                                    finally
+                                    {
+                                        // If _sslEngine.getHandshakeStatus() == status or fill() throws, we are going to enter
+                                        // the finally block that stores the output buffer via lockedReleaseEmptyOutputBuffer().
+                                        // Since the latter expects the member variable to be null, we need to move it here back
+                                        // to the local var.
+                                        encryptedOutput = _encryptedOutput;
+                                        _encryptedOutput = null;
+                                    }
                                 }
                                 result = isEmpty;
                                 break loop;
