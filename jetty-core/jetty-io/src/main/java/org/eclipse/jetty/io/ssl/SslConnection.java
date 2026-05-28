@@ -730,7 +730,8 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                 int filled = -2;
                 ReadableBuffer decryptedInput = null;
                 boolean decryptedInputWrapsUserProvidedBuffer = false;
-                ReadableBuffer encryptedInput = null;
+                ReadableBuffer encryptedInput = _encryptedInput;
+                _encryptedInput = null;
                 long encryptedInputRemainingWriteSpace;
                 try
                 {
