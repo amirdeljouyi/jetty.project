@@ -19,7 +19,8 @@ import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
 
-import org.eclipse.jetty.util.BufferUtil;
+import org.eclipse.jetty.util.buffer.ReadableBuffer;
+import org.eclipse.jetty.util.buffer.WritableBuffer;
 import org.eclipse.jetty.util.thread.Scheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -74,14 +75,27 @@ public class SocketChannelEndPoint extends SelectableChannelEndPoint
     @Override
     public int fill(ByteBuffer buffer) throws IOException
     {
+        WritableBuffer wb = ReadableBuffer.wrap(buffer).toWritable();
+        try
+        {
+            return fill(wb);
+        }
+        finally
+        {
+            wb.toReadable();
+        }
+    }
+
+    @Override
+    public int fill(WritableBuffer buffer) throws IOException
+    {
         if (isInputShutdown())
             return -1;
 
-        int pos = BufferUtil.flipToFill(buffer);
         int filled;
         try
         {
-            filled = getChannel().read(buffer);
+            filled = (int)buffer.readFrom(output -> getChannel().read(output) == -1);
             if (filled > 0)
                 notIdle();
             else if (filled == -1)
@@ -94,22 +108,24 @@ public class SocketChannelEndPoint extends SelectableChannelEndPoint
             shutdownInput();
             filled = -1;
         }
-        finally
-        {
-            BufferUtil.flipToFlush(buffer, pos);
-        }
         if (LOG.isDebugEnabled())
-            LOG.debug("filled {} {}", filled, BufferUtil.toDetailString(buffer));
+            LOG.debug("filled {} {}", filled, buffer);
         return filled;
     }
 
     @Override
     public boolean flush(ByteBuffer... buffers) throws IOException
     {
+        return flush(ReadableBuffer.wrap(buffers));
+    }
+
+    @Override
+    public boolean flush(ReadableBuffer buffer) throws IOException
+    {
         long flushed;
         try
         {
-            flushed = getChannel().write(buffers);
+            flushed = buffer.writeTo(input -> getChannel().write(input));
             if (LOG.isDebugEnabled())
                 LOG.debug("flushed {} {}", flushed, this);
         }
@@ -121,12 +137,6 @@ public class SocketChannelEndPoint extends SelectableChannelEndPoint
         if (flushed > 0)
             notIdle();
 
-        for (ByteBuffer b : buffers)
-        {
-            if (!BufferUtil.isEmpty(b))
-                return false;
-        }
-
-        return true;
+        return buffer.remaining() == 0L;
     }
 }

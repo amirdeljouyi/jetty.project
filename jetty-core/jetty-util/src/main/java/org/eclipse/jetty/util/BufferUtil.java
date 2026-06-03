@@ -576,22 +576,38 @@ public class BufferUtil
      */
     public static int put(ReadableBuffer from, ByteBuffer to)
     {
-        int pos = BufferUtil.flipToFill(to);
-        int filled;
+        WritableBuffer wb = ReadableBuffer.wrap(to).toWritable();
+        try
+        {
+            return (int)put(from, wb);
+        }
+        finally
+        {
+            wb.toReadable();
+        }
+    }
+
+    public static int put(ByteBuffer from, WritableBuffer to)
+    {
+        return (int)put(ReadableBuffer.wrap(from), to);
+    }
+
+    public static long put(ReadableBuffer from, WritableBuffer to)
+    {
+        long filled;
         if (to.remaining() >= from.remaining())
         {
-            filled = (int)from.remaining();
-            WritableBuffer.wrap(to).put(from);
+            filled = from.remaining();
+            to.put(from);
         }
         else
         {
             filled = to.remaining();
-            ReadableBuffer slice = from.slice(from.position(), to.remaining());
-            WritableBuffer.wrap(to).put(slice);
+            ReadableBuffer slice = from.slice(from.position(), filled);
+            to.put(slice);
             slice.release();
             from.position(from.position() + filled);
         }
-        BufferUtil.flipToFlush(to, pos);
         return filled;
     }
 

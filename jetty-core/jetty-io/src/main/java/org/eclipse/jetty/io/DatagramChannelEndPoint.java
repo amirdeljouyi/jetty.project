@@ -22,6 +22,7 @@ import java.nio.channels.WritePendingException;
 
 import org.eclipse.jetty.util.BufferUtil;
 import org.eclipse.jetty.util.Callback;
+import org.eclipse.jetty.util.buffer.ReadableBuffer;
 import org.eclipse.jetty.util.thread.Scheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -113,8 +114,14 @@ public class DatagramChannelEndPoint extends SelectableChannelEndPoint
     }
 
     @Override
+    public void write(ReadableBuffer buffer, SocketAddress address, Callback callback) throws WritePendingException
+    {
+        getWriteFlusher().write(buffer, address, callback);
+    }
+
+    @Override
     public void write(Callback callback, SocketAddress address, ByteBuffer... buffers) throws WritePendingException
     {
-        getWriteFlusher().write(callback, address, buffers);
+        write(ReadableBuffer.wrap(buffers), address, callback);
     }
 }

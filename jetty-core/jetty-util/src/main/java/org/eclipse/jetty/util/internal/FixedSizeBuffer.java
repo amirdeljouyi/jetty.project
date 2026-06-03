@@ -237,9 +237,10 @@ public class FixedSizeBuffer implements WritableBuffer, ReadableBuffer
     @Override
     public String toString()
     {
-        return String.format("%s@%x{b=%s,r=%s}",
+        return String.format("%s@%x{fp=%d,b=%s,r=%s}",
             TypeUtil.toShortName(getClass()),
             hashCode(),
+            flushPosition,
             BufferUtil.toDetailString(byteBuffer),
             retainable);
     }

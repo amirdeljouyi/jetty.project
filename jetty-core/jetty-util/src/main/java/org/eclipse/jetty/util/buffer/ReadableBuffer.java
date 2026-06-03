@@ -15,8 +15,10 @@ package org.eclipse.jetty.util.buffer;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.List;
 
+import org.eclipse.jetty.util.BufferUtil;
 import org.eclipse.jetty.util.Retainable;
 import org.eclipse.jetty.util.internal.AccumulatingReadBuffer;
 import org.eclipse.jetty.util.internal.FixedSizeBuffer;
@@ -47,6 +49,16 @@ public interface ReadableBuffer extends Retainable
         return new FixedSizeBuffer(byteBuffer, new ReferenceCounter(), false);
     }
 
+    static ReadableBuffer wrap(ByteBuffer... buffers)
+    {
+        if (BufferUtil.isEmpty(buffers))
+            return EMPTY;
+        if (buffers.length == 1)
+            return wrap(buffers[0]);
+        List<ReadableBuffer> rbs = Arrays.stream(buffers).map(ReadableBuffer::wrap).toList();
+        return new AccumulatingReadBuffer(rbs);
+    }
+
     /**
      * Wraps the given ReadableBuffer list, using a new {@link ReferenceCounter} for retainability.
      * @param readableBuffers the ReadableBuffer list
@@ -56,6 +68,8 @@ public interface ReadableBuffer extends Retainable
     {
         if (readableBuffers.isEmpty())
             return EMPTY;
+        if (readableBuffers.size() == 1)
+            return readableBuffers.get(0);
         return new AccumulatingReadBuffer(readableBuffers);
     }
 

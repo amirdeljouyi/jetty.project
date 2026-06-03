@@ -25,6 +25,8 @@ import javax.net.ssl.SSLSession;
 
 import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.IO;
+import org.eclipse.jetty.util.buffer.ReadableBuffer;
+import org.eclipse.jetty.util.buffer.WritableBuffer;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.eclipse.jetty.util.thread.Invocable;
 
@@ -178,6 +180,11 @@ public interface EndPoint extends Closeable, Content.Sink
         throw new UnsupportedOperationException();
     }
 
+    default int fill(WritableBuffer buffer) throws IOException
+    {
+        throw new UnsupportedOperationException();
+    }
+
     /**
      * <p>Receives data into the given buffer from the returned address.</p>
      * <p>This method should be used to receive UDP data.</p>
@@ -203,12 +210,17 @@ public interface EndPoint extends Closeable, Content.Sink
      * The header/buffers position is updated to indicate how many bytes
      * have been consumed.</p>
      *
-     * @param buffer the buffers to flush
+     * @param buffers the buffers to flush
      * @return True IFF all the buffers have been consumed and the endpoint has flushed the data to its
      * destination (ie is not buffering any data).
      * @throws IOException If the endpoint is closed or output is shutdown.
      */
-    default boolean flush(ByteBuffer... buffer) throws IOException
+    default boolean flush(ByteBuffer... buffers) throws IOException
+    {
+        return flush(ReadableBuffer.wrap(buffers));
+    }
+
+    default boolean flush(ReadableBuffer buffer) throws IOException
     {
         throw new UnsupportedOperationException();
     }
@@ -226,6 +238,11 @@ public interface EndPoint extends Closeable, Content.Sink
     default boolean send(SocketAddress address, ByteBuffer... buffers) throws IOException
     {
         return flush(buffers);
+    }
+
+    default boolean send(SocketAddress address, ReadableBuffer buffer) throws IOException
+    {
+        return flush(buffer);
     }
 
     /**
@@ -285,6 +302,11 @@ public interface EndPoint extends Closeable, Content.Sink
      */
     default void write(Callback callback, ByteBuffer... buffers) throws WritePendingException
     {
+        write(ReadableBuffer.wrap(buffers), callback);
+    }
+
+    default void write(ReadableBuffer buffer, Callback callback) throws WritePendingException
+    {
         throw new UnsupportedOperationException();
     }
 
@@ -300,7 +322,12 @@ public interface EndPoint extends Closeable, Content.Sink
      */
     default void write(Callback callback, SocketAddress address, ByteBuffer... buffers) throws WritePendingException
     {
-        write(callback, buffers);
+        write(ReadableBuffer.wrap(buffers), null, callback);
+    }
+
+    default void write(ReadableBuffer buffer, SocketAddress address, Callback callback) throws WritePendingException
+    {
+        write(buffer, callback);
     }
 
     @Override

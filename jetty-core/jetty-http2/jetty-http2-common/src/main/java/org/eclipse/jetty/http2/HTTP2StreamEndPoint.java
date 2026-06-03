@@ -33,6 +33,8 @@ import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.ExceptionUtil;
 import org.eclipse.jetty.util.IO;
 import org.eclipse.jetty.util.TypeUtil;
+import org.eclipse.jetty.util.buffer.ReadableBuffer;
+import org.eclipse.jetty.util.buffer.WritableBuffer;
 import org.eclipse.jetty.util.thread.Invocable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -167,6 +169,20 @@ public abstract class HTTP2StreamEndPoint implements EndPoint, Invocable
     @Override
     public int fill(ByteBuffer sink) throws IOException
     {
+        WritableBuffer wb = ReadableBuffer.wrap(sink).toWritable();
+        try
+        {
+            return fill(wb);
+        }
+        finally
+        {
+            wb.toReadable();
+        }
+    }
+
+    @Override
+    public int fill(WritableBuffer sink) throws IOException
+    {
         Stream.Data data = this.data.get();
         if (data != null)
             return fillFromData(data, sink);
@@ -190,21 +206,19 @@ public abstract class HTTP2StreamEndPoint implements EndPoint, Invocable
         return fillFromData(data, sink);
     }
 
-    private int fillFromData(Stream.Data data, ByteBuffer sink)
+    private int fillFromData(Stream.Data data, WritableBuffer sink)
     {
         int length = 0;
         ByteBuffer source = data.frame().getByteBuffer();
         boolean hasContent = source.hasRemaining();
         if (hasContent)
         {
-            int sinkPosition = BufferUtil.flipToFill(sink);
             int sourceLength = source.remaining();
-            length = Math.min(sourceLength, sink.remaining());
+            length = (int)Math.min(sourceLength, sink.remaining());
             int sourceLimit = source.limit();
             source.limit(source.position() + length);
-            sink.put(source);
+            BufferUtil.put(source, sink);
             source.limit(sourceLimit);
-            BufferUtil.flipToFlush(sink, sinkPosition);
         }
 
         if (!source.hasRemaining())
@@ -225,9 +239,15 @@ public abstract class HTTP2StreamEndPoint implements EndPoint, Invocable
     @Override
     public boolean flush(ByteBuffer... buffers) throws IOException
     {
+        return flush(buffers == null ? null : ReadableBuffer.wrap(buffers));
+    }
+
+    @Override
+    public boolean flush(ReadableBuffer buffer) throws IOException
+    {
         if (LOG.isDebugEnabled())
-            LOG.debug("flushing {} on {}", BufferUtil.toDetailString(buffers), this);
-        if (buffers == null || buffers.length == 0 || remaining(buffers) == 0)
+            LOG.debug("flushing {} on {}", buffer, this);
+        if (buffer == null || buffer.remaining() == 0)
             return true;
 
         // Differently from other EndPoint implementations, where write() calls flush(),
