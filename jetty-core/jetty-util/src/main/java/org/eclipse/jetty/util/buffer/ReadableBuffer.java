@@ -68,8 +68,6 @@ public interface ReadableBuffer extends Retainable
     {
         if (readableBuffers.isEmpty())
             return EMPTY;
-        if (readableBuffers.size() == 1)
-            return readableBuffers.get(0);
         return new AccumulatingReadBuffer(readableBuffers);
     }
 
