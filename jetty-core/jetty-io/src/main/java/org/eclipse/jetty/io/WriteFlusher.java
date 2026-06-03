@@ -463,7 +463,6 @@ public abstract class WriteFlusher
      *
      * @param address the datagram channel to send the buffers to (used by QUIC and HTTP/3)
      * @param buffer The buffer to flush
-     * @return The unflushed buffers, or null if all flushed
      * @throws IOException if unable to flush
      */
     protected void flush(SocketAddress address, ReadableBuffer buffer) throws IOException
