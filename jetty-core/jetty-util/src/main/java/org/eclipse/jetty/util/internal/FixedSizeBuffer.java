@@ -100,6 +100,14 @@ public class FixedSizeBuffer implements WritableBuffer, ReadableBuffer
     }
 
     @Override
+    public void get(byte[] b)
+    {
+        if (flushPosition != -1)
+            throw new IllegalStateException("Cannot read from buffer in write mode");
+        byteBuffer.get(b);
+    }
+
+    @Override
     public long writeTo(Target target) throws IOException
     {
         if (flushPosition != -1)

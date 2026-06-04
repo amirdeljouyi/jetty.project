@@ -330,12 +330,12 @@ public class FixedSizeBufferTest
         assertThrows(IllegalStateException.class, rb::getShort);
         assertThrows(IllegalStateException.class, rb::getInt);
         assertThrows(IllegalStateException.class, rb::getLong);
+        assertThrows(IllegalStateException.class, () -> rb.get(new byte[0]));
         assertThrows(IllegalStateException.class, rb::compact);
         assertThrows(IllegalStateException.class, rb::toWritable);
         assertThrows(IllegalStateException.class, rb::slice);
         assertThrows(IllegalStateException.class, () -> rb.slice(1L, 2L));
-        assertThrows(IllegalStateException.class, () -> rb.writeTo(b ->
-        {}));
+        assertThrows(IllegalStateException.class, () -> rb.writeTo(input -> {}));
     }
 
     @Test
@@ -369,9 +369,11 @@ public class FixedSizeBufferTest
         assertEquals((short)2, rb.getShort());
         assertEquals(4, rb.getInt());
         assertEquals(8, rb.getLong());
-        assertEquals((byte)1, rb.get());
-        assertEquals((byte)2, rb.get());
-        assertEquals((byte)3, rb.get());
+        byte[] bytes = new byte[3];
+        rb.get(bytes);
+        assertEquals((byte)1, bytes[0]);
+        assertEquals((byte)2, bytes[1]);
+        assertEquals((byte)3, bytes[2]);
         assertEquals(0, wb.remaining());
     }
 

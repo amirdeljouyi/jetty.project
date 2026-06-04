@@ -37,6 +37,7 @@ import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.IO;
 import org.eclipse.jetty.util.Promise;
 import org.eclipse.jetty.util.TypeUtil;
+import org.eclipse.jetty.util.buffer.ReadableBuffer;
 import org.eclipse.jetty.util.thread.AutoLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -381,11 +382,11 @@ public class StreamEndPoint implements EndPoint
     }
 
     @Override
-    public boolean flush(ByteBuffer... buffers) throws IOException
+    public boolean flush(ReadableBuffer buffer) throws IOException
     {
         if (LOG.isDebugEnabled())
-            LOG.debug("flushing {} on {}", BufferUtil.toDetailString(buffers), this);
-        if (buffers == null || buffers.length == 0 || BufferUtil.remaining(buffers) == 0)
+            LOG.debug("flushing {} on {}", buffer, this);
+        if (buffer == null || buffer.remaining() == 0L)
             return true;
 
         // Differently from other EndPoint implementations, where write() calls

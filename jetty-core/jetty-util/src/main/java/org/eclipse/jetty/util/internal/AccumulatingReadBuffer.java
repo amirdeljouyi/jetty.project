@@ -192,6 +192,19 @@ public class AccumulatingReadBuffer implements ReadableBuffer
     }
 
     @Override
+    public void get(byte[] b)
+    {
+        ReadableBuffer currentRb = currentReadableBuffer();
+        if (currentRb.remaining() >= b.length)
+        {
+            position += b.length;
+            currentRb.get(b);
+            return;
+        }
+        fragmentedGet(currentRb, b.length).get(b);
+    }
+
+    @Override
     public ReadableBuffer slice()
     {
         List<ReadableBuffer> copy = new ArrayList<>(readableBuffers.size());

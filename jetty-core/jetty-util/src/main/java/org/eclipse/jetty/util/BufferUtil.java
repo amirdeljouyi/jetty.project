@@ -895,6 +895,17 @@ public class BufferUtil
         return new String(array, buffer.arrayOffset() + buffer.position(), buffer.remaining(), charset);
     }
 
+    public static String toString(ReadableBuffer buffer, Charset charset)
+    {
+        if (buffer == null)
+            return null;
+        byte[] to = new byte[Math.toIntExact(buffer.remaining())];
+        long positionBefore = buffer.position();
+        buffer.get(to);
+        buffer.position(positionBefore);
+        return new String(to, charset);
+    }
+
     /**
      * Convert a partial buffer to a String.
      *

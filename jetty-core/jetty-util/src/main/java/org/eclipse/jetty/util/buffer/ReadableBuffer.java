@@ -122,6 +122,12 @@ public interface ReadableBuffer extends Retainable
     long getLong();
 
     /**
+     * Reads a byte array at the current position.
+     * @throws java.nio.BufferUnderflowException – If the buffer's {@link #remaining()} is less than the array's length.
+     */
+    void get(byte[] b);
+
+    /**
      * Slices this ReadableBuffer, {@link Retainable#retain() retaining} it in the process.
      * @return a new ReadableBuffer with a position of 0 that indexes the current ReadableBuffer's {@link #position()}
      * and an adjusted capacity equal to the current ReadableBuffer's {@link #capacity()} - the current
