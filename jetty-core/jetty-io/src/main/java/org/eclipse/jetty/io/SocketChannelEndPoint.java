@@ -15,6 +15,7 @@ package org.eclipse.jetty.io;
 
 import java.io.IOException;
 import java.net.SocketAddress;
+import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
 
@@ -104,7 +105,20 @@ public class SocketChannelEndPoint extends SelectableChannelEndPoint
         long flushed;
         try
         {
-            flushed = buffer.writeTo(input -> getChannel().write(input));
+            flushed = buffer.writeTo(new ReadableBuffer.GatheringTarget()
+            {
+                @Override
+                public void write(ByteBuffer[] inputs) throws IOException
+                {
+                    getChannel().write(inputs);
+                }
+
+                @Override
+                public void write(ByteBuffer input) throws IOException
+                {
+                    getChannel().write(input);
+                }
+            });
             if (LOG.isDebugEnabled())
                 LOG.debug("flushed {} {}", flushed, this);
         }
