@@ -874,6 +874,11 @@ public class BufferUtil
         return toString(buffer, StandardCharsets.ISO_8859_1);
     }
 
+    public static String toString(ReadableBuffer buffer)
+    {
+        return toString(buffer, StandardCharsets.ISO_8859_1);
+    }
+
     /**
      * Convert buffer to a String with specified Charset
      *
@@ -1282,6 +1287,16 @@ public class BufferUtil
         BufferUtil.flipToFlush(buffer, pos);
 
         return buffer;
+    }
+
+    public static ByteBuffer toBuffer(ReadableBuffer buffer, boolean direct)
+    {
+        long capacity = buffer.remaining();
+        if (capacity > Integer.MAX_VALUE)
+            throw new BufferOverflowException();
+        ByteBuffer result = BufferUtil.allocate((int)capacity, direct);
+        put(buffer, result);
+        return result;
     }
 
     public static ByteBuffer toDirectBuffer(String s)

@@ -122,7 +122,7 @@ public class WriteFlusherTest
             flusher.onFail(new IOException("Ignored because no operation in progress"));
 
         FutureCallback callback = new FutureCallback();
-        flusher.write(callback, BufferUtil.toBuffer("How "), BufferUtil.toBuffer("now "), BufferUtil.toBuffer("brown "), BufferUtil.toBuffer("cow!"));
+        flusher.write(ReadableBuffer.wrap(BufferUtil.toBuffer("How "), BufferUtil.toBuffer("now "), BufferUtil.toBuffer("brown "), BufferUtil.toBuffer("cow!")), callback);
 
         assertTrue(callback.isDone());
         assertFalse(incompleteFlush.get());
@@ -147,7 +147,7 @@ public class WriteFlusherTest
         };
 
         FutureCallback callback = new FutureCallback();
-        flusher.write(callback, BufferUtil.toBuffer("foo"));
+        flusher.write(ReadableBuffer.wrap(BufferUtil.toBuffer("foo")), callback);
 
         assertTrue(callback.isDone());
         assertFalse(incompleteFlush.get());
@@ -179,7 +179,7 @@ public class WriteFlusherTest
         };
 
         FutureCallback callback = new FutureCallback();
-        flusher.write(callback, BufferUtil.toBuffer("How now brown cow!"));
+        flusher.write(ReadableBuffer.wrap(BufferUtil.toBuffer("How now brown cow!")), callback);
 
         assertFalse(callback.isDone());
         assertFalse(callback.isCancelled());
@@ -230,7 +230,7 @@ public class WriteFlusherTest
 
         try (StacklessLogging stacklessLogging = new StacklessLogging(WriteFlusher.class))
         {
-            flusher.write(callback, BufferUtil.toBuffer("How now brown cow!"));
+            flusher.write(ReadableBuffer.wrap(BufferUtil.toBuffer("How now brown cow!")), callback);
             callback.get(100, TimeUnit.MILLISECONDS);
         }
 
@@ -256,7 +256,7 @@ public class WriteFlusherTest
         };
 
         FutureCallback callback = new FutureCallback();
-        flusher.write(callback, BufferUtil.toBuffer("How now brown cow!"));
+        flusher.write(ReadableBuffer.wrap(BufferUtil.toBuffer("How now brown cow!")), callback);
 
         assertFalse(callback.isDone());
         assertFalse(callback.isCancelled());
@@ -296,7 +296,7 @@ public class WriteFlusherTest
         };
 
         FutureCallback callback = new FutureCallback();
-        flusher.write(callback, BufferUtil.toBuffer("How now brown cow!"));
+        flusher.write(ReadableBuffer.wrap(BufferUtil.toBuffer("How now brown cow!")), callback);
 
         assertFalse(callback.isDone());
         assertFalse(callback.isCancelled());
@@ -341,7 +341,7 @@ public class WriteFlusherTest
                 FutureCallback callback = new FutureCallback();
                 futures[i] = callback;
                 scheduler.schedule(() -> flusher.onFail(new Throwable(reason)), (i % 75) + 1, TimeUnit.MILLISECONDS);
-                flusher.write(callback, BufferUtil.toBuffer("How Now Brown Cow."), BufferUtil.toBuffer(" The quick brown fox jumped over the lazy dog!"));
+                flusher.write(ReadableBuffer.wrap(BufferUtil.toBuffer("How Now Brown Cow."), BufferUtil.toBuffer(" The quick brown fox jumped over the lazy dog!")), callback);
             }
 
             int completed = 0;
@@ -394,7 +394,7 @@ public class WriteFlusherTest
             }
         };
 
-        flusher.write(Callback.NOOP, buffer1, buffer2);
+        flusher.write(ReadableBuffer.wrap(buffer1, buffer2), Callback.NOOP);
         assertTrue(incompleteFlush.get());
         assertFalse(buffer1.hasRemaining());
 
@@ -441,13 +441,13 @@ public class WriteFlusherTest
         };
 
         // Two concurrent writes.
-        new Thread(() -> flusher.write(Callback.NOOP, BufferUtil.toBuffer("foo"))).start();
+        new Thread(() -> flusher.write(ReadableBuffer.wrap(BufferUtil.toBuffer("foo")), Callback.NOOP)).start();
         assertTrue(flushLatch.await(1, TimeUnit.SECONDS));
 
         assertThrows(WritePendingException.class, () ->
         {
             // The second write throws WritePendingException.
-            flusher.write(Callback.NOOP, BufferUtil.toBuffer("bar"));
+            flusher.write(ReadableBuffer.wrap(BufferUtil.toBuffer("bar")), Callback.NOOP);
         });
     }
 
@@ -475,7 +475,7 @@ public class WriteFlusherTest
             };
 
             FutureCallback callback = new FutureCallback();
-            flusher.write(callback, BufferUtil.toBuffer("foo"));
+            flusher.write(ReadableBuffer.wrap(BufferUtil.toBuffer("foo")), callback);
 
             assertTrue(flusher.isFailed());
 
@@ -501,7 +501,7 @@ public class WriteFlusherTest
 
         FutureCallback callback = new FutureCallback();
         byte[] content = new byte[capacity * 2];
-        flusher.write(callback, BufferUtil.toBuffer(content));
+        flusher.write(ReadableBuffer.wrap(BufferUtil.toBuffer(content)), callback);
 
         try
         {

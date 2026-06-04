@@ -972,9 +972,9 @@ public class ProxyConnectionFactory extends DetectorConnectionFactory
         }
 
         @Override
-        public void write(Callback callback, ByteBuffer... buffers) throws WritePendingException
+        public void write(ReadableBuffer buffer, Callback callback) throws WritePendingException
         {
-            _endPoint.write(callback, buffers);
+            _endPoint.write(buffer, callback);
         }
     }
 }

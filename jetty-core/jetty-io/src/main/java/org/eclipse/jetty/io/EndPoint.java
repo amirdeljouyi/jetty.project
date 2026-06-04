@@ -338,34 +338,38 @@ public interface EndPoint extends Closeable, Content.Sink
         write(buffer, callback);
     }
 
-    @Override
-    default void write(boolean last, ByteBuffer byteBuffer, Callback callback)
+    default void write(boolean last, ReadableBuffer buffer, Callback callback)
     {
         if (last)
         {
-            write(Callback.from(() ->
-                {
-                    try
+            write(buffer, Callback.from(() ->
                     {
-                        close();
-                        callback.succeeded();
-                    }
-                    catch (Throwable t)
+                        try
+                        {
+                            close();
+                            callback.succeeded();
+                        }
+                        catch (Throwable t)
+                        {
+                            callback.failed(t);
+                        }
+                    },
+                    x ->
                     {
-                        callback.failed(t);
-                    }
-                },
-                x ->
-                {
-                    IO.close(this);
-                    callback.failed(x);
-                }),
-                byteBuffer);
+                        IO.close(this);
+                        callback.failed(x);
+                    }));
         }
         else
         {
-            write(callback, byteBuffer);
+            write(buffer, callback);
         }
+    }
+
+    @Override
+    default void write(boolean last, ByteBuffer byteBuffer, Callback callback)
+    {
+        write(last, ReadableBuffer.wrap(byteBuffer), callback);
     }
 
     /**

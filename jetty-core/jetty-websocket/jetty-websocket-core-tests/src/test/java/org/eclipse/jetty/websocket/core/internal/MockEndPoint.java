@@ -14,7 +14,6 @@
 package org.eclipse.jetty.websocket.core.internal;
 
 import java.net.SocketAddress;
-import java.nio.ByteBuffer;
 import java.nio.channels.ReadPendingException;
 import java.nio.channels.WritePendingException;
 
@@ -131,7 +130,7 @@ public class MockEndPoint implements EndPoint
     }
 
     @Override
-    public void write(Callback callback, ByteBuffer... buffers) throws WritePendingException
+    public void write(ReadableBuffer buffer, Callback callback) throws WritePendingException
     {
         throw new UnsupportedOperationException(NOT_SUPPORTED);
     }

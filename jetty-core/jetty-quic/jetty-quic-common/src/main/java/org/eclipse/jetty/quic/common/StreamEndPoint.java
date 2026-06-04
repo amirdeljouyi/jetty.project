@@ -410,13 +410,7 @@ public class StreamEndPoint implements EndPoint
     @Override
     public void write(Callback callback, ByteBuffer... buffers) throws WritePendingException
     {
-        write(false, List.of(buffers), callback);
-    }
-
-    @Override
-    public void write(boolean last, ByteBuffer byteBuffer, Callback callback)
-    {
-        write(last, List.of(byteBuffer), callback);
+        write(false, ReadableBuffer.wrap(buffers), callback);
     }
 
     @Override
@@ -426,11 +420,18 @@ public class StreamEndPoint implements EndPoint
         throw new UnsupportedOperationException();
     }
 
-    public void write(boolean last, List<ByteBuffer> buffers, Callback callback)
+    @Override
+    public void write(ReadableBuffer buffer, Callback callback) throws WritePendingException
+    {
+        write(false, buffer, callback);
+    }
+
+    @Override
+    public void write(boolean last, ReadableBuffer buffer, Callback callback)
     {
         if (LOG.isDebugEnabled())
-            LOG.debug("writing last={} {} on {}", last, BufferUtil.toDetailString(buffers.toArray(ByteBuffer[]::new)), this);
-        if (last || remaining(buffers) > 0)
+            LOG.debug("writing last={} {} on {}", last, buffer, this);
+        if (last || buffer.remaining() > 0L)
         {
             while (true)
             {
@@ -441,7 +442,7 @@ public class StreamEndPoint implements EndPoint
                     {
                         if (!writeState.compareAndSet(current, WriteState.PENDING))
                             continue;
-                        stream.data(last, buffers, new Promise.Invocable.Abstract<>(callback.getInvocationType())
+                        stream.data(last, List.of(BufferUtil.toBuffer(buffer, true)), new Promise.Invocable.Abstract<>(callback.getInvocationType())
                         {
                             @Override
                             public void succeeded(Stream result)

@@ -294,11 +294,11 @@ public abstract class HTTP2StreamEndPoint implements EndPoint, Invocable
     }
 
     @Override
-    public void write(Callback callback, ByteBuffer... buffers) throws WritePendingException
+    public void write(ReadableBuffer buffer, Callback callback) throws WritePendingException
     {
         if (LOG.isDebugEnabled())
-            LOG.debug("writing {} on {}", BufferUtil.toDetailString(buffers), this);
-        if (buffers == null || buffers.length == 0 || remaining(buffers) == 0)
+            LOG.debug("writing {} on {}", buffer, this);
+        if (buffer == null || buffer.remaining() == 0L)
         {
             callback.succeeded();
         }
@@ -315,7 +315,7 @@ public abstract class HTTP2StreamEndPoint implements EndPoint, Invocable
                         if (!writeState.compareAndSet(current, pending))
                             continue;
                         // TODO: we really need a Stream primitive to write multiple frames.
-                        ByteBuffer result = coalesce(buffers);
+                        ByteBuffer result = coalesce(buffer);
                         stream.data(new DataFrame(stream.getId(), result, false), pending);
                     }
                     case PENDING -> callback.failed(new WritePendingException());
@@ -417,23 +417,13 @@ public abstract class HTTP2StreamEndPoint implements EndPoint, Invocable
         }
     }
 
-    private long remaining(ByteBuffer... buffers)
+    private ByteBuffer coalesce(ReadableBuffer buffer)
     {
-        return BufferUtil.remaining(buffers);
-    }
-
-    private ByteBuffer coalesce(ByteBuffer[] buffers)
-    {
-        if (buffers.length == 1)
-            return buffers[0];
-        long capacity = remaining(buffers);
+        long capacity = buffer.remaining();
         if (capacity > Integer.MAX_VALUE)
             throw new BufferOverflowException();
         ByteBuffer result = BufferUtil.allocateDirect((int)capacity);
-        for (ByteBuffer buffer : buffers)
-        {
-            BufferUtil.append(result, buffer);
-        }
+        BufferUtil.put(buffer, result);
         return result;
     }
 

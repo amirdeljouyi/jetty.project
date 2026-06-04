@@ -280,15 +280,10 @@ public abstract class WriteFlusher
      *
      * If all buffers have been written it calls callback.complete().
      *
+     * @param buffer the buffer to flush to the endpoint
      * @param callback the callback to call on either failed or complete
-     * @param buffers the buffers to flush to the endpoint
      * @throws WritePendingException if unable to write due to prior pending write
      */
-    public void write(Callback callback, ByteBuffer... buffers) throws WritePendingException
-    {
-        write(ReadableBuffer.wrap(buffers), null, callback);
-    }
-
     public void write(ReadableBuffer buffer, Callback callback) throws WritePendingException
     {
         write(buffer, null, callback);
