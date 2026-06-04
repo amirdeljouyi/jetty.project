@@ -13,7 +13,6 @@
 
 package org.eclipse.jetty.websocket.core.internal;
 
-import java.io.IOException;
 import java.net.SocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.ReadPendingException;
@@ -22,6 +21,8 @@ import java.nio.channels.WritePendingException;
 import org.eclipse.jetty.io.Connection;
 import org.eclipse.jetty.io.EndPoint;
 import org.eclipse.jetty.util.Callback;
+import org.eclipse.jetty.util.buffer.ReadableBuffer;
+import org.eclipse.jetty.util.buffer.WritableBuffer;
 
 public class MockEndPoint implements EndPoint
 {
@@ -82,13 +83,13 @@ public class MockEndPoint implements EndPoint
     }
 
     @Override
-    public int fill(ByteBuffer buffer) throws IOException
+    public int fill(WritableBuffer buffer)
     {
         throw new UnsupportedOperationException(NOT_SUPPORTED);
     }
 
     @Override
-    public boolean flush(ByteBuffer... buffer) throws IOException
+    public boolean flush(ReadableBuffer buffer)
     {
         throw new UnsupportedOperationException(NOT_SUPPORTED);
     }

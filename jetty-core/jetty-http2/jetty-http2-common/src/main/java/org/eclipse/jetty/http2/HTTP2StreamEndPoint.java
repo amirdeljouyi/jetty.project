@@ -167,20 +167,6 @@ public abstract class HTTP2StreamEndPoint implements EndPoint, Invocable
     }
 
     @Override
-    public int fill(ByteBuffer sink) throws IOException
-    {
-        WritableBuffer wb = ReadableBuffer.wrap(sink).toWritable();
-        try
-        {
-            return fill(wb);
-        }
-        finally
-        {
-            wb.toReadable();
-        }
-    }
-
-    @Override
     public int fill(WritableBuffer sink) throws IOException
     {
         Stream.Data data = this.data.get();
@@ -234,12 +220,6 @@ public abstract class HTTP2StreamEndPoint implements EndPoint, Invocable
         }
 
         return length;
-    }
-
-    @Override
-    public boolean flush(ByteBuffer... buffers) throws IOException
-    {
-        return flush(buffers == null ? null : ReadableBuffer.wrap(buffers));
     }
 
     @Override

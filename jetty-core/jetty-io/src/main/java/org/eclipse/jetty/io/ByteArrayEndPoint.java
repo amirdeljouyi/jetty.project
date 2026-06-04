@@ -388,20 +388,6 @@ public class ByteArrayEndPoint extends AbstractEndPoint
     }
 
     @Override
-    public int fill(ByteBuffer buffer) throws IOException
-    {
-        WritableBuffer wb = ReadableBuffer.wrap(buffer).toWritable();
-        try
-        {
-            return fill(wb);
-        }
-        finally
-        {
-            wb.toReadable();
-        }
-    }
-
-    @Override
     public int fill(WritableBuffer buffer) throws IOException
     {
         int filled = 0;
@@ -441,12 +427,6 @@ public class ByteArrayEndPoint extends AbstractEndPoint
         else if (filled < 0)
             shutdownInput();
         return filled;
-    }
-
-    @Override
-    public boolean flush(ByteBuffer... buffers) throws IOException
-    {
-        return flush(ReadableBuffer.wrap(buffers));
     }
 
     @Override

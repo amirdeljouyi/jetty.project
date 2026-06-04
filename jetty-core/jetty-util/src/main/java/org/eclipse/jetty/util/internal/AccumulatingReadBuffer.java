@@ -260,6 +260,17 @@ public class AccumulatingReadBuffer implements ReadableBuffer
     @Override
     public long writeTo(Target target) throws IOException
     {
+        if (target instanceof GatheringTarget gatheringTarget)
+        {
+            long totalRemainingBefore = remaining();
+            List<ByteBuffer> buffers = new ArrayList<>();
+            toByteBuffers(buffers);
+            gatheringTarget.write(buffers.toArray(new ByteBuffer[0]));
+            long totalWritten = totalRemainingBefore - remaining();
+            position += totalWritten;
+            return totalWritten;
+        }
+
         long totalWritten = 0L;
         for (int i = 0; i < readableBuffers.size(); i++)
         {
@@ -279,6 +290,19 @@ public class AccumulatingReadBuffer implements ReadableBuffer
                 break;
         }
         return totalWritten;
+    }
+
+    private void toByteBuffers(List<ByteBuffer> result)
+    {
+        for (ReadableBuffer readableBuffer : readableBuffers)
+        {
+            if (readableBuffer instanceof AccumulatingReadBuffer accumulatingReadBuffer)
+                accumulatingReadBuffer.toByteBuffers(result);
+            if (readableBuffer instanceof FixedSizeBuffer fixedSizeBuffer)
+                result.add(fixedSizeBuffer.getByteBuffer());
+            else
+                throw new IllegalStateException("Unsupported ReadableBuffer type: " + readableBuffer.getClass().getName());
+        }
     }
 
     // Retainable

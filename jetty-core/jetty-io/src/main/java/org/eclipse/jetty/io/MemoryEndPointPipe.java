@@ -153,20 +153,6 @@ public class MemoryEndPointPipe implements EndPoint.Pipe
         }
 
         @Override
-        public int fill(ByteBuffer buffer) throws IOException
-        {
-            WritableBuffer wb = ReadableBuffer.wrap(buffer).toWritable();
-            try
-            {
-                return fill(wb);
-            }
-            finally
-            {
-                wb.toReadable();
-            }
-        }
-
-        @Override
         public int fill(WritableBuffer buffer) throws IOException
         {
             if (!isOpen())
@@ -268,12 +254,6 @@ public class MemoryEndPointPipe implements EndPoint.Pipe
                 LOG.debug("try fill interested, data available {}", this);
             callback.succeeded();
             return false;
-        }
-
-        @Override
-        public boolean flush(ByteBuffer... buffers) throws IOException
-        {
-            return flush(ReadableBuffer.wrap(buffers));
         }
 
         @Override

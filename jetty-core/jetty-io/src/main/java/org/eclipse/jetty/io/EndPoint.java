@@ -177,7 +177,15 @@ public interface EndPoint extends Closeable, Content.Sink
      */
     default int fill(ByteBuffer buffer) throws IOException
     {
-        throw new UnsupportedOperationException();
+        WritableBuffer wb = ReadableBuffer.wrap(buffer).toWritable();
+        try
+        {
+            return fill(wb);
+        }
+        finally
+        {
+            wb.toReadable();
+        }
     }
 
     default int fill(WritableBuffer buffer) throws IOException
@@ -217,7 +225,7 @@ public interface EndPoint extends Closeable, Content.Sink
      */
     default boolean flush(ByteBuffer... buffers) throws IOException
     {
-        return flush(ReadableBuffer.wrap(buffers));
+        return flush(buffers == null ? null : ReadableBuffer.wrap(buffers));
     }
 
     default boolean flush(ReadableBuffer buffer) throws IOException

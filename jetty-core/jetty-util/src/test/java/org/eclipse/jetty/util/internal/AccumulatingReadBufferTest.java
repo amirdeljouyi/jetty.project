@@ -28,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 public class AccumulatingReadBufferTest
 {
@@ -557,6 +558,53 @@ public class AccumulatingReadBufferTest
 
         assertEquals(4, acc.position());
         assertEquals(0, acc.remaining());
+    }
+
+    @Test
+    public void testWriteToGathering() throws IOException
+    {
+        ReadableBuffer rb1 = ReadableBuffer.wrap(ByteBuffer.allocate(10)
+            .putInt(11)
+            .putInt(12)
+            .flip());
+        ReadableBuffer rb2 = ReadableBuffer.wrap(ByteBuffer.allocate(10)
+            .putInt(13)
+            .putInt(14)
+            .flip());
+        ReadableBuffer acc = ReadableBuffer.accumulate(List.of(rb1, rb2));
+        assertEquals(0, acc.position());
+        assertEquals(16, acc.remaining());
+
+        List<Integer> writtenIntegers = new ArrayList<>();
+        long written = acc.writeTo(new ReadableBuffer.GatheringTarget()
+        {
+            @Override
+            public void write(ByteBuffer[] inputs)
+            {
+                for (ByteBuffer input : inputs)
+                {
+                    while (input.hasRemaining())
+                    {
+                        writtenIntegers.add(input.getInt());
+                    }
+                }
+            }
+
+            @Override
+            public void write(ByteBuffer input)
+            {
+                fail("gathering write should have been called instead");
+            }
+        });
+        assertEquals(16, written);
+
+        assertEquals(16, acc.position());
+        assertEquals(0, acc.remaining());
+        assertEquals(4, writtenIntegers.size());
+        assertEquals(11, writtenIntegers.get(0));
+        assertEquals(12, writtenIntegers.get(1));
+        assertEquals(13, writtenIntegers.get(2));
+        assertEquals(14, writtenIntegers.get(3));
     }
 
     @Test

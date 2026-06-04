@@ -180,7 +180,22 @@ public interface ReadableBuffer extends Retainable
          * Flushes a given NIO ByteBuffer. Note that this method can be called more than once if the {@code input} byte buffer
          * is depleted, for instance if the WritableBuffer is backed by more than one NIO ByteBuffer.
          * @param input the buffer to be written
+         * @throws IOException when IOException occurs
          */
         void write(ByteBuffer input) throws IOException;
+    }
+
+    /**
+     * Interface of the Target (i.e.: byte destination) used to flush a ReadableBuffer via the NIO ByteBuffer API when the
+     * target supports gathering writes.
+     */
+    interface GatheringTarget extends Target
+    {
+        /**
+         * Flushes a given NIO ByteBuffer. Note that this method is never be called more than once.
+         * @param inputs the buffer to be written
+         * @throws IOException when IOException occurs
+         */
+        void write(ByteBuffer[] inputs) throws IOException;
     }
 }

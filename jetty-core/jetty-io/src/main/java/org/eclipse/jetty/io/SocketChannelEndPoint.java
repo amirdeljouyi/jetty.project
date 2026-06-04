@@ -15,7 +15,6 @@ package org.eclipse.jetty.io;
 
 import java.io.IOException;
 import java.net.SocketAddress;
-import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
 
@@ -73,20 +72,6 @@ public class SocketChannelEndPoint extends SelectableChannelEndPoint
     }
 
     @Override
-    public int fill(ByteBuffer buffer) throws IOException
-    {
-        WritableBuffer wb = ReadableBuffer.wrap(buffer).toWritable();
-        try
-        {
-            return fill(wb);
-        }
-        finally
-        {
-            wb.toReadable();
-        }
-    }
-
-    @Override
     public int fill(WritableBuffer buffer) throws IOException
     {
         if (isInputShutdown())
@@ -111,12 +96,6 @@ public class SocketChannelEndPoint extends SelectableChannelEndPoint
         if (LOG.isDebugEnabled())
             LOG.debug("filled {} {}", filled, buffer);
         return filled;
-    }
-
-    @Override
-    public boolean flush(ByteBuffer... buffers) throws IOException
-    {
-        return flush(ReadableBuffer.wrap(buffers));
     }
 
     @Override

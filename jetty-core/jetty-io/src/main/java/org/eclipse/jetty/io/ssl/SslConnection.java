@@ -14,7 +14,6 @@
 package org.eclipse.jetty.io.ssl;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.net.SocketAddress;
 import java.nio.ByteBuffer;
 import java.security.cert.X509Certificate;
@@ -544,26 +543,12 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
 
     protected int networkFill(WritableBuffer input) throws IOException
     {
-        return (int)input.readFrom(output ->
-        {
-            output.flip();
-            try
-            {
-                int filled = getEndPoint().fill(output);
-                return filled == -1;
-            }
-            finally
-            {
-                BufferUtil.flipToFill(output);
-            }
-        });
+        return getEndPoint().fill(input);
     }
 
     protected boolean networkFlush(ReadableBuffer output) throws IOException
     {
-        long toBeWritten = output.remaining();
-        long written = output.writeTo(input -> getEndPoint().flush(input));
-        return toBeWritten == written;
+        return getEndPoint().flush(output);
     }
 
     public class SslEndPoint extends AbstractEndPoint implements EndPoint.Wrapper
@@ -648,7 +633,7 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                         waitingForFill = _flushState == FlushState.WAIT_FOR_FILL;
                     }
                     if (waitingForFill)
-                        fill(BufferUtil.EMPTY_BUFFER);
+                        fill(WritableBuffer.EMPTY);
                 }
             }
             catch (Throwable e)
@@ -702,20 +687,6 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
         public SslConnection getSslConnection()
         {
             return SslConnection.this;
-        }
-
-        @Override
-        public int fill(ByteBuffer buffer) throws IOException
-        {
-            WritableBuffer wb = ReadableBuffer.wrap(buffer).toWritable();
-            try
-            {
-                return fill(wb);
-            }
-            finally
-            {
-                wb.toReadable();
-            }
         }
 
         @Override
@@ -1110,18 +1081,11 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                 }
 
                 if (read != null)
-                    read.writeTo(input -> getEndPoint().write(_incompleteWriteCallback, input));
+                    getEndPoint().write(read, _incompleteWriteCallback);
                 else if (fillable)
                     getExecutor().execute(_runFillable);
                 else if (interest)
                     ensureFillInterested();
-            }
-            catch (IOException x)
-            {
-                if (LOG.isDebugEnabled())
-                    LOG.debug("{}", SslConnection.this, x);
-                close(x);
-                throw new UncheckedIOException(x);
             }
             catch (Throwable x)
             {
@@ -1201,12 +1165,6 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
         }
 
         @Override
-        public boolean flush(ByteBuffer... appOuts) throws IOException
-        {
-            return flush(ReadableBuffer.wrap(appOuts));
-        }
-
-        @Override
         public boolean flush(ReadableBuffer appOut) throws IOException
         {
             try (AutoLock ignored = _lock.lock())
@@ -1272,7 +1230,7 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                                     encryptedOutput = null;
                                     try
                                     {
-                                        int filled = fill(BufferUtil.EMPTY_BUFFER);
+                                        int filled = fill(WritableBuffer.EMPTY);
                                         if (_sslEngine.getHandshakeStatus() != status)
                                             continue;
                                         if (filled < 0)
@@ -1322,12 +1280,23 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                                 SSLEngineResult[] wrapResultArray = new SSLEngineResult[1];
                                 wb.readFrom(output ->
                                 {
-                                    appOut.writeTo(input ->
+                                    appOut.writeTo(new ReadableBuffer.GatheringTarget()
                                     {
-                                        SSLEngineResult wrapResult1 = wrap(_sslEngine, new ByteBuffer[]{input}, output);
-                                        if (wrapResultArray[0] != null)
-                                            throw new IllegalStateException("Unexpected wrapResultArray[0] " + wrapResultArray[0]);
-                                        wrapResultArray[0] = wrapResult1;
+                                        @Override
+                                        public void write(ByteBuffer[] inputs) throws IOException
+                                        {
+                                            SSLEngineResult wrapResult1 = wrap(_sslEngine, inputs, output);
+                                            wrapResultArray[0] = wrapResult1;
+                                        }
+
+                                        @Override
+                                        public void write(ByteBuffer input) throws IOException
+                                        {
+                                            if (wrapResultArray[0] != null)
+                                                throw new IllegalStateException("Multi-buffer output does not support gather writes while it must. Existing wrap result: " + wrapResultArray[0]);
+                                            SSLEngineResult wrapResult1 = wrap(_sslEngine, new ByteBuffer[]{input}, output);
+                                            wrapResultArray[0] = wrapResult1;
+                                        }
                                     });
                                     return wrapResultArray[0].getStatus() == Status.CLOSED;
                                 });
@@ -1503,7 +1472,7 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                                 // Try filling ourselves
                                 try
                                 {
-                                    int filled = fill(BufferUtil.EMPTY_BUFFER);
+                                    int filled = fill(WritableBuffer.EMPTY);
                                     // If this changed the status, let's try again
                                     if (_sslEngine.getHandshakeStatus() != status)
                                         continue;
@@ -1537,16 +1506,9 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                 }
 
                 if (encryptedOutput != null)
-                    encryptedOutput.writeTo(input -> getEndPoint().write(_incompleteWriteCallback, input));
+                    getEndPoint().write(encryptedOutput, _incompleteWriteCallback);
                 else if (fillInterest)
                     ensureFillInterested();
-            }
-            catch (IOException x)
-            {
-                if (LOG.isDebugEnabled())
-                    LOG.debug("{}", SslConnection.this, x);
-                close(x);
-                throw new UncheckedIOException(x);
             }
             catch (Throwable x)
             {
@@ -1603,7 +1565,7 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                                 _flushState = FlushState.WRITING;
                         }
                         if (encryptedOutput != null)
-                            encryptedOutput.writeTo(input -> endPoint.write(Callback.from(this::shutdownOutputWriteSuccess, this::shutdownOutputWriteFailure), input));
+                            endPoint.write(encryptedOutput, Callback.from(this::shutdownOutputWriteSuccess, this::shutdownOutputWriteFailure));
                     }
                 }
 
