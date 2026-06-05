@@ -330,7 +330,7 @@ public interface EndPoint extends Closeable, Content.Sink
      */
     default void write(Callback callback, SocketAddress address, ByteBuffer... buffers) throws WritePendingException
     {
-        write(ReadableBuffer.wrap(buffers), null, callback);
+        write(ReadableBuffer.wrap(buffers), address, callback);
     }
 
     default void write(ReadableBuffer buffer, SocketAddress address, Callback callback) throws WritePendingException

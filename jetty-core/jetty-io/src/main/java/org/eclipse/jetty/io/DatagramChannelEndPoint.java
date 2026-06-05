@@ -81,26 +81,17 @@ public class DatagramChannelEndPoint extends SelectableChannelEndPoint
     }
 
     @Override
-    public boolean send(SocketAddress address, ByteBuffer... buffers) throws IOException
+    public boolean send(SocketAddress address, ReadableBuffer buffer) throws IOException
     {
-        boolean flushedAll = true;
-        long flushed = 0;
+        long toSend = buffer.remaining();
+        long flushed;
         try
         {
             if (LOG.isDebugEnabled())
-                LOG.debug("flushing {} buffer(s) to {}", buffers.length, address);
-            for (ByteBuffer buffer : buffers)
-            {
-                int sent = getChannel().send(buffer, address);
-                if (sent == 0)
-                {
-                    flushedAll = false;
-                    break;
-                }
-                flushed += sent;
-            }
+                LOG.debug("flushing {} to {}", buffer, address);
+            flushed = buffer.writeTo(input -> getChannel().send(input, address));
             if (LOG.isDebugEnabled())
-                LOG.debug("flushed {} byte(s), all flushed? {} - {}", flushed, flushedAll, this);
+                LOG.debug("flushed {} byte(s) - {}", flushed, this);
         }
         catch (IOException e)
         {
@@ -110,18 +101,12 @@ public class DatagramChannelEndPoint extends SelectableChannelEndPoint
         if (flushed > 0)
             notIdle();
 
-        return flushedAll;
+        return flushed == toSend;
     }
 
     @Override
     public void write(ReadableBuffer buffer, SocketAddress address, Callback callback) throws WritePendingException
     {
         getWriteFlusher().write(buffer, address, callback);
-    }
-
-    @Override
-    public void write(Callback callback, SocketAddress address, ByteBuffer... buffers) throws WritePendingException
-    {
-        write(ReadableBuffer.wrap(buffers), address, callback);
     }
 }

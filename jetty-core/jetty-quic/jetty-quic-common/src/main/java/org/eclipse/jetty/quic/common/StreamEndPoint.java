@@ -38,6 +38,7 @@ import org.eclipse.jetty.util.IO;
 import org.eclipse.jetty.util.Promise;
 import org.eclipse.jetty.util.TypeUtil;
 import org.eclipse.jetty.util.buffer.ReadableBuffer;
+import org.eclipse.jetty.util.buffer.WritableBuffer;
 import org.eclipse.jetty.util.thread.AutoLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -248,7 +249,7 @@ public class StreamEndPoint implements EndPoint
     }
 
     @Override
-    public int fill(ByteBuffer sink) throws IOException
+    public int fill(WritableBuffer sink) throws IOException
     {
         Content.Chunk current;
         try (AutoLock ignored = lock.lock())
@@ -266,7 +267,7 @@ public class StreamEndPoint implements EndPoint
                 ByteBuffer source = current.getByteBuffer();
                 if (source.hasRemaining())
                 {
-                    int filled = copy(current, sink);
+                    int filled = BufferUtil.put(current.getByteBuffer(), sink);
 
                     boolean release = true;
                     if (source.hasRemaining())
@@ -363,24 +364,6 @@ public class StreamEndPoint implements EndPoint
         return current;
     }
 
-    private int copy(Content.Chunk chunk, ByteBuffer sink)
-    {
-        int length = 0;
-        ByteBuffer source = chunk.getByteBuffer();
-        if (source.hasRemaining())
-        {
-            int sinkPosition = BufferUtil.flipToFill(sink);
-            int sourceLength = source.remaining();
-            length = Math.min(sourceLength, sink.remaining());
-            int sourceLimit = source.limit();
-            source.limit(source.position() + length);
-            sink.put(source);
-            source.limit(sourceLimit);
-            BufferUtil.flipToFlush(sink, sinkPosition);
-        }
-        return length;
-    }
-
     @Override
     public boolean flush(ReadableBuffer buffer) throws IOException
     {
@@ -405,12 +388,6 @@ public class StreamEndPoint implements EndPoint
             case CLOSING, CLOSED -> throw new EofException("output shutdown");
             case FAILED -> throw IO.rethrow(writeFailure.get());
         };
-    }
-
-    @Override
-    public void write(Callback callback, ByteBuffer... buffers) throws WritePendingException
-    {
-        write(false, ReadableBuffer.wrap(buffers), callback);
     }
 
     @Override
