@@ -746,7 +746,7 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                                     decryptedInput = decryptedInputIsUserProvidedBuffer ? decryptedInput : null;
                                     try
                                     {
-                                        if (flush(BufferUtil.EMPTY_BUFFER))
+                                        if (flush(ReadableBuffer.EMPTY))
                                         {
                                             Throwable failure = _failure;
                                             if (failure != null)
@@ -825,6 +825,14 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                         {
                             // can we use the passed buffer if it is big enough
                             WritableBuffer writableAppIn;
+                            if (decryptedInput != null && decryptedInputIsUserProvidedBuffer)
+                            {
+                                // decryptedInput was sliced from buffer -> release the slice
+                                // and restore the original buffer.
+                                decryptedInput.release();
+                                decryptedInput = null;
+                            }
+
                             if (decryptedInput != null)
                             {
                                 // Re-use the buffer acquired in a previous loop iteration.
@@ -843,6 +851,7 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
                                 {
                                     // Acquire a fresh new buffer.
                                     writableAppIn = _bufferPool.acquire(appBufferSize, _decryptedDirectBuffers);
+                                    decryptedInputIsUserProvidedBuffer = false;
                                 }
                             }
                             else
@@ -1553,7 +1562,7 @@ public class SslConnection extends AbstractConnection implements Connection.Upgr
 
                 if (flush)
                 {
-                    if (!flush(BufferUtil.EMPTY_BUFFER) && !close)
+                    if (!flush(ReadableBuffer.EMPTY) && !close)
                     {
                         // If we still can't flush, but we are not closing the endpoint,
                         // let's just flush the encrypted output in the background.
