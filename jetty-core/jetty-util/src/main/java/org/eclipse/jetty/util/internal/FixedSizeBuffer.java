@@ -124,6 +124,9 @@ public class FixedSizeBuffer implements WritableBuffer, ReadableBuffer
             throw new IllegalStateException("Buffer already in write mode");
         if (byteBuffer.isReadOnly())
             throw new IllegalStateException("Buffer is read-only");
+        // Always compact when there is nothing to copy.
+        if (remaining() == 0L)
+            byteBuffer.compact().flip();
         flushPosition = byteBuffer.position();
         byteBuffer.position(byteBuffer.limit());
         byteBuffer.limit(byteBuffer.capacity());
