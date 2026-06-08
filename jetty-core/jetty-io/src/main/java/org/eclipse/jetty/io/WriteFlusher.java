@@ -236,9 +236,9 @@ public abstract class WriteFlusher
         private PendingState(Callback callback, SocketAddress address, ReadableBuffer buffer)
         {
             super(StateType.PENDING);
-            _callback = callback;
             _address = address;
             _buffer = buffer;
+            _callback = Callback.from(callback, _buffer::release);
             buffer.retain();
         }
 
@@ -424,7 +424,6 @@ public abstract class WriteFlusher
             {
                 if (LOG.isDebugEnabled())
                     LOG.debug("flushed incomplete {}", buffer);
-                buffer = null; // do not release the buffer
                 if (updateState(__COMPLETING, pending))
                     onIncompleteFlush();
                 else
@@ -445,11 +444,6 @@ public abstract class WriteFlusher
                 callback.failed(e);
             else
                 fail(callback, e);
-        }
-        finally
-        {
-            if (buffer != null)
-                buffer.release();
         }
     }
 
