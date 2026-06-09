@@ -38,10 +38,11 @@ public class FixedSizeBufferTest
         ReadableBuffer rb = wb.toReadable();
         assertEquals(1, rb.getInt());
         rb.toWritable();
-        wb.position(2); // rewind write position
+        wb.position(4); // 'revive' the 4 bytes previously written
         wb.toReadable();
-        assertEquals(2, rb.position());
-        assertEquals(0, rb.remaining());
+        assertEquals(0, rb.position());
+        assertEquals(4, rb.remaining());
+        assertEquals(1, rb.getInt());
     }
 
     @Test
@@ -265,8 +266,8 @@ public class FixedSizeBufferTest
         assertEquals(0L, rb.remaining());
 
         WritableBuffer wb = rb.toWritable();
-        assertEquals(8L, wb.position());
-        assertEquals(2L, wb.remaining());
+        assertEquals(0L, wb.position());
+        assertEquals(10L, wb.remaining());
     }
 
     @Test
