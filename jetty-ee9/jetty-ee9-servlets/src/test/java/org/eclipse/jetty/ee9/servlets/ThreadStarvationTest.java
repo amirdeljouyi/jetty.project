@@ -339,7 +339,10 @@ public class ThreadStarvationTest
                     @Override
                     public boolean flush(ReadableBuffer buffer) throws IOException
                     {
-                        super.flush(buffer);
+                        ReadableBuffer slice = buffer.slice(0, 100);
+                        super.flush(slice);
+                        slice.release();
+                        buffer.position(slice.position());
                         throw new IOException("TEST FAILURE");
                     }
                 };
