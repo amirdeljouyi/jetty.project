@@ -199,12 +199,7 @@ public abstract class HTTP2StreamEndPoint implements EndPoint, Invocable
         boolean hasContent = source.hasRemaining();
         if (hasContent)
         {
-            int sourceLength = source.remaining();
-            length = (int)Math.min(sourceLength, sink.remaining());
-            int sourceLimit = source.limit();
-            source.limit(source.position() + length);
-            BufferUtil.put(source, sink);
-            source.limit(sourceLimit);
+            length = BufferUtil.put(source, sink);
         }
 
         if (!source.hasRemaining())
@@ -422,7 +417,7 @@ public abstract class HTTP2StreamEndPoint implements EndPoint, Invocable
         long capacity = buffer.remaining();
         if (capacity > Integer.MAX_VALUE)
             throw new BufferOverflowException();
-        ByteBuffer result = BufferUtil.allocateDirect((int)capacity);
+        ByteBuffer result = BufferUtil.allocate((int)capacity);
         BufferUtil.put(buffer, result);
         return result;
     }
