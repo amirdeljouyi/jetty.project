@@ -420,13 +420,13 @@ public class WriteFlusherTest
         WriteFlusher flusher = new WriteFlusher(endPoint)
         {
             @Override
-            protected void flush(SocketAddress address, ReadableBuffer buffer) throws IOException
+            protected boolean flush(SocketAddress address, ReadableBuffer buffer) throws IOException
             {
                 try
                 {
                     flushLatch.countDown();
                     Thread.sleep(2000);
-                    super.flush(address, buffer);
+                    return super.flush(address, buffer);
                 }
                 catch (InterruptedException x)
                 {
@@ -461,11 +461,12 @@ public class WriteFlusherTest
             WriteFlusher flusher = new WriteFlusher(endPoint)
             {
                 @Override
-                protected void flush(SocketAddress address, ReadableBuffer buffer) throws IOException
+                protected boolean flush(SocketAddress address, ReadableBuffer buffer) throws IOException
                 {
-                    super.flush(address, buffer);
+                    boolean flushed = super.flush(address, buffer);
                     boolean notified = onFail(new Throwable());
                     assertTrue(notified);
+                    return flushed;
                 }
 
                 @Override
