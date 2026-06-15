@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.eclipse.jetty.util.Retainable;
+import org.eclipse.jetty.util.TypeUtil;
 import org.eclipse.jetty.util.buffer.ReadableBuffer;
 import org.eclipse.jetty.util.buffer.WritableBuffer;
 
@@ -355,5 +356,16 @@ public class AccumulatingReadBuffer implements ReadableBuffer
     public int getRetained()
     {
         return retainable.getRetained();
+    }
+
+    @Override
+    public String toString()
+    {
+        return String.format("%s@%x{ls=%s,bs=%s,r=%s}",
+            TypeUtil.toShortName(getClass()),
+            hashCode(),
+            limits,
+            readableBuffers,
+            retainable);
     }
 }
