@@ -307,9 +307,8 @@ public abstract class WriteFlusher
 
         try
         {
-            flush(address, buffer);
-
-            if (buffer.remaining() != 0L)
+            boolean fullyFlushed = flush(address, buffer);
+            if (!fullyFlushed)
             {
                 if (LOG.isDebugEnabled())
                     LOG.debug("flush incomplete {}", this);
@@ -452,9 +451,10 @@ public abstract class WriteFlusher
      *
      * @param address the datagram channel to send the buffers to (used by QUIC and HTTP/3)
      * @param buffer The buffer to flush
+     * @return true if the buffer was fully flushed
      * @throws IOException if unable to flush
      */
-    protected void flush(SocketAddress address, ReadableBuffer buffer) throws IOException
+    protected boolean flush(SocketAddress address, ReadableBuffer buffer) throws IOException
     {
         boolean progress = true;
         while (progress && buffer.remaining() != 0L)
@@ -468,13 +468,18 @@ public abstract class WriteFlusher
                 LOG.debug("Flushed={} written={} remaining={} {}", flushed, written, after, this);
 
             if (flushed)
-                return;
+                return true;
 
             progress = written > 0;
         }
 
         if (LOG.isDebugEnabled())
             LOG.debug("!fully flushed {}", this);
+
+        // If we reach here, then flush has returned false but has consumed all the data!
+        // This is probably SSL being unable to flush the encrypted buffer, so return false
+        // and that will keep this WriteFlusher pending.
+        return false;
     }
 
     /**
